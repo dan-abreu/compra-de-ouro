@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OrderStatus {
+  DRAFT
+  FINALIZED
+  CANCELED
+}
+
+enum Currency {
+  SRD
+  USD
+  EUR
+}
+
+enum PaymentOrderType {
+  PURCHASE
+  SALE
+}
+
+model User {
+  id           String        @id @default(cuid())
+  fullName     String        @db.VarChar(120)
+  email        String        @unique @db.VarChar(180)
+  passwordHash String        @db.VarChar(255)
+  role         UserRole
+  status       RecordStatus  @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  createdPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCreatedBy")
+  canceledPurchaseOrders PurchaseOrder[] @relation("PurchaseOrderCanceledBy")
+  createdSalesOrders    SalesOrder[]    @relation("SalesOrderCreatedBy")
+  canceledSalesOrders   SalesOrder[]    @relation("SalesOrderCanceledBy")
+  createdDailyRates     DailyRate[]
+}
+
+model Client {
+  id                 String       @id @default(cuid())
+  fullName           String       @db.VarChar(180)
+  documentId         String       @db.VarChar(80)
+  phone              String?      @db.VarChar(40)
+  address            String?      @db.VarChar(255)
+  goldOrigin         String?      @db.VarChar(180)
+  kycDocumentUrl     String?      @db.VarChar(500)
+  status             RecordStatus @default(ACTIVE)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  purchaseOrders     PurchaseOrder[]
+
+  @@index([fullName])
+  @@index([documentId])
+}
+
+model Supplier {
+  id                 String       @id @default(cuid())
+  companyName        String       @db.VarChar(180)
+  documentId         String       @db.VarChar(80)
+  contactName        String?      @db.VarChar(120)
+  phone              String?      @db.VarChar(40)
+  address            String?      @db.VarChar(255)
+  status             RecordStatus @default(ACTIVE)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  salesOrders        SalesOrder[]
+
+  @@index([companyName])
+  @@index([documentId])
+}
+
+model DailyRate {
+  id                String   @id @default(cuid())
+  rateDate          DateTime @db.Date
+  goldPricePerGram  Decimal  @db.Decimal(18, 4)
+  usdToSrdRate      Decimal  @db.Decimal(18, 4)
+  eurToSrdRate      Decimal  @db.Decimal(18, 4)
+  createdById       String
+  createdAt         DateTime @default(now())
+
+  createdBy         User     @relation(fields: [createdById], references: [id])
+
+  @@unique([rateDate])
+}
+
+model Vault {
+  id                         String   @id @default(cuid())
+  code                       String   @unique @default("MAIN") @db.VarChar(32)
+  physicalGoldFineWeight     Decimal  @db.Decimal(18, 4)
+  balanceSrd                 Decimal  @db.Decimal(18, 4)
+  balanceUsd                 Decimal  @db.Decimal(18, 4)
+  balanceEur                 Decimal  @db.Decimal(18, 4)
+  openGoldFineWeight         Decimal  @db.Decimal(18, 4)
+  openGoldAcquisitionCostSrd Decimal  @db.Decimal(18, 4)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model PurchaseOrder {
+  id                        String      @id @default(cuid())
+  status                    OrderStatus @default(DRAFT)
+  clientId                  String
+  createdById               String
+  createdAt                 DateTime    @default(now())
+  canceledAt                DateTime?
+  canceledById              String?
+  cancelReason              String?     @db.VarChar(255)
+
+  grossWeight               Decimal     @db.Decimal(18, 4)
+  netWeight                 Decimal     @db.Decimal(18, 4)
+  purityPercentage          Decimal     @db.Decimal(18, 4)
+  fineGoldWeight            Decimal     @db.Decimal(18, 4)
+
+  lockedGoldPricePerGram    Decimal     @db.Decimal(18, 4)
+  lockedUsdToSrdRate        Decimal     @db.Decimal(18, 4)
+  lockedEurToSrdRate        Decimal     @db.Decimal(18, 4)
+
+  totalAmountSrd            Decimal     @db.Decimal(18, 4)
+  acquisitionCostSrd        Decimal     @db.Decimal(18, 4)
+
+  client                    Client      @relation(fields: [clientId], references: [id])
+  createdBy                 User        @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  canceledBy                User?       @relation("PurchaseOrderCanceledBy", fields: [canceledById], references: [id])
+  paymentSplits             PaymentSplit[]
+
+  @@index([clientId])
+  @@index([createdById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SalesOrder {
+  id                        String      @id @default(cuid())
+  status                    OrderStatus @default(DRAFT)
+  supplierId                String
+  createdById               String
+  createdAt                 DateTime    @default(now())
+  canceledAt                DateTime?
+  canceledById              String?
+  cancelReason              String?     @db.VarChar(255)
+
+  fineGoldWeightSold        Decimal     @db.Decimal(18, 4)
+  negotiatedTotalSrd        Decimal     @db.Decimal(18, 4)
+
+  lockedGoldPricePerGram    Decimal     @db.Decimal(18, 4)
+  lockedUsdToSrdRate        Decimal     @db.Decimal(18, 4)
+  lockedEurToSrdRate        Decimal     @db.Decimal(18, 4)
+
+  averageAcquisitionCostSrd Decimal     @db.Decimal(18, 4)
+  realizedProfitSrd         Decimal     @db.Decimal(18, 4)
+
+  supplier                  Supplier    @relation(fields: [supplierId], references: [id])
+  createdBy                 User        @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  canceledBy                User?       @relation("SalesOrderCanceledBy", fields: [canceledById], references: [id])
+  paymentSplits             PaymentSplit[]
+
+  @@index([supplierId])
+  @@index([createdById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PaymentSplit {
+  id                String           @id @default(cuid())
+  orderType         PaymentOrderType
+  purchaseOrderId   String?
+  salesOrderId      String?
+  currency          Currency
+  amount            Decimal          @db.Decimal(18, 4)
+  convertedValueSrd Decimal          @db.Decimal(18, 4)
+  createdAt         DateTime         @default(now())
+
+  purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
+  salesOrder        SalesOrder?      @relation(fields: [salesOrderId], references: [id])
+
+  @@index([orderType])
+  @@index([purchaseOrderId])
+  @@index([salesOrderId])
+  @@index([currency])
+}

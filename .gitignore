@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+package-lock.json
+npm-debug.log
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Prisma
+prisma/.env
+prisma/dev.db
+
+# Misc
+.cache/
+.vercel/
+coverage/
