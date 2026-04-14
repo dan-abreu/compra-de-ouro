@@ -16,10 +16,13 @@ router.get("/", async (_req, res) => {
     createdAt: order.createdAt,
     kind: "PURCHASE",
     status: order.status,
-    fineGoldWeight: order.fineGoldWeight,
-    costSrd: order.acquisitionCostSrd,
+    physicalWeight: order.physicalWeight,
+    costSrd: (Number(order.acquisitionCostUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
+    costUsd: Number(order.acquisitionCostUsd || 0).toFixed(4),
     revenueSrd: "0.0000",
-    profitSrd: "0.0000"
+    revenueUsd: "0.0000",
+    profitSrd: "0.0000",
+    profitUsd: "0.0000"
   }));
 
   const saleRows = sales.map((order) => ({
@@ -27,10 +30,19 @@ router.get("/", async (_req, res) => {
     createdAt: order.createdAt,
     kind: "SALE",
     status: order.status,
-    fineGoldWeight: order.fineGoldWeightSold,
-    costSrd: order.averageAcquisitionCostSrd,
-    revenueSrd: order.negotiatedTotalSrd,
-    profitSrd: order.status === OrderStatus.CANCELED ? "0.0000" : order.realizedProfitSrd
+    physicalWeight: order.physicalWeight,
+    costSrd: (Number(order.averageAcquisitionCostUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
+    costUsd: Number(order.averageAcquisitionCostUsd || 0).toFixed(4),
+    revenueSrd: (Number(order.negotiatedTotalUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
+    revenueUsd: Number(order.negotiatedTotalUsd || 0).toFixed(4),
+    profitSrd:
+      order.status === OrderStatus.CANCELED
+        ? "0.0000"
+        : (Number(order.realizedProfitUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
+    profitUsd:
+      order.status === OrderStatus.CANCELED
+        ? "0.0000"
+        : Number(order.realizedProfitUsd || 0).toFixed(4)
   }));
 
   const timeline = [...purchaseRows, ...saleRows].sort(

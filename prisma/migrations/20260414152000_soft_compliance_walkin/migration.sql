@@ -1,0 +1,9 @@
+ALTER TABLE "PurchaseOrder"
+  ALTER COLUMN "clientId" DROP NOT NULL,
+  ADD COLUMN "isWalkIn" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "complianceOverride" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "SalesOrder"
+  ALTER COLUMN "supplierId" DROP NOT NULL,
+  ADD COLUMN "isWalkIn" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "complianceOverride" BOOLEAN NOT NULL DEFAULT false;

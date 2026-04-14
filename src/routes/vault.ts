@@ -12,12 +12,12 @@ router.get("/", async (_req, res) => {
     vault = await prisma.vault.create({
       data: {
         code: "MAIN",
-        physicalGoldFineWeight: new Prisma.Decimal("0.0000"),
+        balanceGoldGrams: new Prisma.Decimal("0.0000"),
         balanceSrd: new Prisma.Decimal("0.0000"),
         balanceUsd: new Prisma.Decimal("0.0000"),
         balanceEur: new Prisma.Decimal("0.0000"),
-        openGoldFineWeight: new Prisma.Decimal("0.0000"),
-        openGoldAcquisitionCostSrd: new Prisma.Decimal("0.0000")
+        openGoldGrams: new Prisma.Decimal("0.0000"),
+        openGoldAcquisitionCostUsd: new Prisma.Decimal("0.0000")
       }
     });
   }

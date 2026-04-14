@@ -1,13 +1,15 @@
-import { Currency } from "@prisma/client";
+import { Currency, GoldState } from "@prisma/client";
 import { NextFunction, Request, Response, Router } from "express";
 import { z } from "zod";
 
-import { DomainError } from "../lib/errors.js";
+import { DomainError, FieldErrorMap } from "../lib/errors.js";
 import { prisma } from "../prisma.js";
-import { OrderService } from "../services/order-service.js";
+import { PurchaseOrderService } from "../services/purchase-order-service.js";
+import { SalesOrderService } from "../services/sales-order-service.js";
 
 const router = Router();
-const orderService = new OrderService(prisma);
+const purchaseOrderService = new PurchaseOrderService(prisma);
+const salesOrderService = new SalesOrderService(prisma);
 
 const decimalString = z
   .string()
@@ -18,29 +20,66 @@ const splitSchema = z.object({
   amount: decimalString
 });
 
-const createPurchaseSchema = z.object({
-  clientId: z.string().min(1),
-  createdById: z.string().min(1),
-  dailyRateId: z.string().min(1).optional(),
-  grossWeight: decimalString,
-  netWeight: decimalString,
-  purityPercentage: decimalString,
-  paymentSplits: z.array(splitSchema).min(1)
-});
+const createPurchaseSchema = z
+  .object({
+    supplierId: z.string().min(1).optional(),
+    isWalkIn: z.boolean().optional().default(false),
+    createdById: z.string().min(1),
+    dailyRateId: z.string().min(1).optional(),
+    goldState: z.nativeEnum(GoldState),
+    physicalWeight: decimalString,
+    purityPercentage: decimalString,
+    negotiatedPricePerGram: decimalString,
+    totalOrderValueUsd: decimalString,
+    paymentSplits: z.array(splitSchema).min(1)
+  })
+  .superRefine((data, ctx) => {
+    if (!data.isWalkIn && !data.supplierId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "supplierId is required when isWalkIn is false.",
+        path: ["supplierId"]
+      });
+    }
+  });
 
-const createSalesSchema = z.object({
-  supplierId: z.string().min(1),
-  createdById: z.string().min(1),
-  dailyRateId: z.string().min(1).optional(),
-  fineGoldWeightSold: decimalString,
-  negotiatedTotalSrd: decimalString,
-  paymentSplits: z.array(splitSchema).min(1)
-});
+const createSalesSchema = z
+  .object({
+    clientId: z.string().min(1).optional(),
+    isWalkIn: z.boolean().optional().default(false),
+    createdById: z.string().min(1),
+    dailyRateId: z.string().min(1).optional(),
+    goldState: z.nativeEnum(GoldState),
+    physicalWeight: decimalString,
+    purityPercentage: decimalString,
+    negotiatedPricePerGram: decimalString,
+    totalOrderValueUsd: decimalString,
+    paymentSplits: z.array(splitSchema).min(1)
+  })
+  .superRefine((data, ctx) => {
+    if (!data.isWalkIn && !data.clientId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "clientId is required when isWalkIn is false.",
+        path: ["clientId"]
+      });
+    }
+  });
 
 const cancelSchema = z.object({
   canceledById: z.string().min(1),
   reason: z.string().max(255).optional()
 });
+
+const mapZodIssuesToFieldErrors = (issues: z.ZodIssue[]): FieldErrorMap => {
+  return issues.reduce<FieldErrorMap>((acc, issue) => {
+    const path = issue.path.join(".");
+    if (path && !acc[path]) {
+      acc[path] = issue.message;
+    }
+    return acc;
+  }, {});
+};
 
 const asyncHandler = <T>(fn: (req: Request, res: Response) => Promise<T>) => {
   return async (req: Request, res: Response, _next: NextFunction) => {
@@ -48,14 +87,28 @@ const asyncHandler = <T>(fn: (req: Request, res: Response) => Promise<T>) => {
       await fn(req, res);
     } catch (error) {
       if (error instanceof DomainError) {
-        return res.status(error.statusCode).json({ message: error.message });
+        return res.status(error.statusCode).json({
+          message: error.message,
+          code: error.code,
+          fieldErrors: error.fieldErrors ?? {}
+        });
       }
 
       if (error instanceof Error && "issues" in error) {
-        return res.status(422).json({ message: "Invalid payload", issues: (error as z.ZodError).issues });
+        const zodError = error as z.ZodError;
+        return res.status(422).json({
+          message: "Invalid payload",
+          code: "VALIDATION_ERROR",
+          fieldErrors: mapZodIssuesToFieldErrors(zodError.issues),
+          issues: zodError.issues
+        });
       }
 
-      return res.status(500).json({ message: "Internal server error" });
+      return res.status(500).json({
+        message: "Internal server error",
+        code: "INTERNAL_SERVER_ERROR",
+        fieldErrors: {}
+      });
     }
   };
 };
@@ -64,7 +117,18 @@ router.post(
   "/purchase",
   asyncHandler(async (req, res) => {
     const payload = createPurchaseSchema.parse(req.body);
-    const order = await orderService.createPurchaseOrder(payload);
+    const order = await purchaseOrderService.create({
+      supplierId: payload.supplierId,
+      isWalkIn: payload.isWalkIn,
+      createdById: payload.createdById,
+      dailyRateId: payload.dailyRateId,
+      goldState: payload.goldState,
+      physicalWeight: payload.physicalWeight,
+      purityPercentage: payload.purityPercentage,
+      negotiatedPricePerGramUsd: payload.negotiatedPricePerGram,
+      totalOrderValueUsd: payload.totalOrderValueUsd,
+      paymentSplits: payload.paymentSplits
+    });
     res.status(201).json(order);
   })
 );
@@ -73,7 +137,18 @@ router.post(
   "/sale",
   asyncHandler(async (req, res) => {
     const payload = createSalesSchema.parse(req.body);
-    const order = await orderService.createSalesOrder(payload);
+    const order = await salesOrderService.create({
+      clientId: payload.clientId,
+      isWalkIn: payload.isWalkIn,
+      createdById: payload.createdById,
+      dailyRateId: payload.dailyRateId,
+      goldState: payload.goldState,
+      physicalWeight: payload.physicalWeight,
+      purityPercentage: payload.purityPercentage,
+      negotiatedPricePerGramUsd: payload.negotiatedPricePerGram,
+      totalOrderValueUsd: payload.totalOrderValueUsd,
+      paymentSplits: payload.paymentSplits
+    });
     res.status(201).json(order);
   })
 );
@@ -81,28 +156,16 @@ router.post(
 router.post(
   "/purchase/:orderId/cancel",
   asyncHandler(async (req, res) => {
-    const payload = cancelSchema.parse(req.body);
-    const order = await orderService.cancelPurchaseOrder({
-      orderId: req.params.orderId,
-      canceledById: payload.canceledById,
-      reason: payload.reason
-    });
-
-    res.status(200).json(order);
+    cancelSchema.parse(req.body);
+    res.status(501).json({ message: "Purchase order cancellation not refactored yet for the new USD schema." });
   })
 );
 
 router.post(
   "/sale/:orderId/cancel",
   asyncHandler(async (req, res) => {
-    const payload = cancelSchema.parse(req.body);
-    const order = await orderService.cancelSalesOrder({
-      orderId: req.params.orderId,
-      canceledById: payload.canceledById,
-      reason: payload.reason
-    });
-
-    res.status(200).json(order);
+    cancelSchema.parse(req.body);
+    res.status(501).json({ message: "Sales order cancellation not refactored yet for the new USD schema." });
   })
 );
 

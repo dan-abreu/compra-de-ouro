@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import cors from "cors";
 import express from "express";
 
 import { clientsRouter } from "./routes/clients.js";
@@ -12,7 +13,9 @@ import { vaultRouter } from "./routes/vault.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? "3000");
+const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:3003";
 
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {

@@ -1,6 +1,7 @@
-# 🏆 Compra de Ouro - ERP/Livro-Caixa
+# Compra de Ouro - ERP/Livro-Caixa
 
-SaaS web interno para casa de compra e venda de ouro local no Suriname. Sistema de rastreabilidade imutável com contabilidade decimal-only (sem float).
+SaaS web interno para casa de compra e venda de ouro no Suriname.
+Sistema de rastreabilidade imutavel com contabilidade decimal-only (sem float) e fluxo operacional orientado a caixa.
 
 ## 📋 Stack Tecnológico
 
@@ -9,43 +10,46 @@ SaaS web interno para casa de compra e venda de ouro local no Suriname. Sistema 
 - **Banco de Dados**: PostgreSQL com Decimal(18,4)
 - **Linguagem**: TypeScript (strict mode)
 
-## 🎯 Funcionalidades Principais
+## Funcionalidades Principais
 
-### PASSO 1: Modelagem Append-Only + Snapshot
-- ✅ Tabelas: User, Client, Supplier, Vault, PurchaseOrder, SalesOrder, PaymentSplit, DailyRate
-- ✅ Padrão append-only: ordens canceladas recebem `status = 'CANCELED'` (sem hard delete)
-- ✅ Snapshot de taxa/preço travado em cada ordem
-- ✅ Todos os valores em `Decimal(18,4)` (PostgreSQL)
+### Modelagem Append-Only + Snapshot
+- Tabelas principais: User, Client, Supplier, Vault, PurchaseOrder, SalesOrder, PaymentSplit, DailyRate, VaultLedger
+- Padrao append-only: ordens canceladas recebem `status = 'CANCELED'` (sem hard delete)
+- Snapshot de taxa/preco travado em cada ordem
+- Todos os valores em `Decimal(18,4)` (PostgreSQL)
 
-### PASSO 2: Backend com Transações ACID
-- ✅ Cálculo automático de ouro fino: `fineGoldWeight = netWeight * (purityPercentage / 100)`
-- ✅ Split payment multimoeda com validação exata
-- ✅ Atualização transacional do Vault com isolamento `Serializable`
-- ✅ Custo médio de aquisição para cálculo de lucro na venda
+### Backend com transacoes ACID
+- Compra usando fornecedor e venda usando cliente
+- Cadastro flexivel: cliente/fornecedor podem ser salvos apenas com nome
+- Modo avulso com controle de compliance por threshold
+- Split payment multimoeda com validacao exata
+- Atualizacao transacional do Vault com isolamento `Serializable`
+- Custo medio de aquisicao para calculo de lucro na venda
 
-### PASSO 3: Frontend - 6 Páginas
+### Frontend
 
-1. **Dashboard**: Saldo do cofre, ouro em aberto, formulário de taxa manual do dia
-2. **Compra POS**: Seleção de cliente, cálculo de ouro fino, split payment dinâmico
-3. **Venda B2B**: Peso de ouro fino, valor negociado, split payment de recebimento
-4. **Extrato (Ledger)**: Timeline cronológica com lucro calculado, botão de cancelamento
-5. **Cadastro de Clientes**: Dados + upload KYC
-6. **Cadastro de Fornecedores**: Dados de empresas B2B
+1. Dashboard: saldo do cofre, ouro em aberto e formulario de taxa diaria
+2. Compra POS: contraparte fornecedor com modo avulso, preco negociado e split dinamico
+3. Venda: contraparte cliente com modo avulso, preco negociado e split dinamico
+4. Extrato (Ledger): timeline cronologica com custo/receita/lucro
+5. Cadastro de Clientes: cadastro flexivel (somente nome obrigatorio)
+6. Cadastro de Fornecedores: cadastro flexivel (somente nome da empresa obrigatorio)
+7. TradePartySelector: autocomplete reutilizavel com recentes + ordenacao A-Z
 
-## 🚀 Quick Start
+## Quick Start
 
-### Pré-requisitos
+### Pre-requisitos
 - Node.js 18+
 - PostgreSQL 14+
 
-### Instalação
+### Instalacao
 
 ```bash
 # Instalar dependências backend
 npm install
 
 # Instalar dependências frontend
-cd web && npm install && cd ..
+npm --prefix web install
 
 # Configurar banco de dados
 cp .env.example .env
@@ -54,23 +58,44 @@ cp .env.example .env
 # Gerar Prisma Client
 npm run prisma:generate
 
-# Migrations (se houver)
-npm run prisma:migrate
+# Aplicar migrations pendentes
+npx prisma migrate deploy
 ```
 
 ### Executar
 
 ```bash
-# Terminal 1: Backend (porta 3000)
-npm run dev
+# Terminal 1: Backend (porta 3002)
+set PORT=3002 && npm run dev
 
-# Terminal 2: Frontend (porta 3001)
-cd web && npm run dev
+# PowerShell equivalente
+$env:PORT=3002; npm run dev
+
+# Terminal 2: Frontend (porta 3003)
+npm --prefix web exec -- next dev --port 3003
+
+# Opcional por variavel (script padrao usa 3001)
+$env:PORT=3003; npm --prefix web run dev
 ```
 
-Acesse: **http://localhost:3001/dashboard**
+Acesse: **http://localhost:3003/dashboard**
 
-## 📁 Estrutura
+## CORS em dev
+
+Por padrao, o backend permite origem:
+
+```bash
+http://localhost:3003
+```
+
+Pode ser alterado por variavel:
+
+```bash
+set CORS_ORIGIN=http://localhost:3003
+npm run dev
+```
+
+## Estrutura
 
 ```
 compra-de-ouro/
@@ -81,7 +106,9 @@ compra-de-ouro/
 │   │   ├── decimal.ts         # Utilitários Decimal
 │   │   └── errors.ts          # Classes de erro
 │   ├── services/
-│   │   └── order-service.ts   # Lógica transacional
+│   │   ├── purchase-order-service.ts
+│   │   ├── sales-order-service.ts
+│   │   └── order-service.ts
 │   └── routes/
 │       ├── orders.ts          # POST /api/orders/purchase, /sale
 │       ├── rates.ts           # POST /api/rates, GET /latest
@@ -101,27 +128,34 @@ compra-de-ouro/
 │   │   ├── fornecedores/page.tsx
 │   │   └── globals.css
 │   ├── components/
-│   │   ├── app-shell.tsx      # Layout + navação
-│   │   ├── split-payment.tsx  # Editor de split multimoeda
-│   │   └── ui.tsx             # Componentes reutilizáveis
+│   │   ├── TradePartySelector.tsx
+│   │   ├── PurchasePage.tsx
+│   │   ├── SalesPage.tsx
+│   │   ├── ClientsPage.tsx
+│   │   ├── SuppliersPage.tsx
+│   │   ├── TreasurySplitPlanner.tsx
+│   │   ├── PriceSuggestionBreakdown.tsx
+│   │   └── ui.tsx
 │   └── lib/
-│       ├── decimal.ts         # Decimal para front
-│       └── api.ts             # Cliente HTTP
+│       ├── decimal.ts
+│       ├── api.ts
+│       ├── treasury.ts
+│       └── complianceConfig.ts
 └── .env.example
 ```
 
-## 🔐 REGRA ABSOLUTA: Decimal, Nunca Float
+## Regra Absoluta: Decimal, Nunca Float
 
 Todos os valores monetários, câmbio e peso em:
 - PostgreSQL: `DECIMAL(18,4)`
-- Node: `decimal.js` (Prisma.Decimal)
+- Node: `decimal.js` e `Prisma.Decimal`
 - React: `decimal.js` com formatação `toFixed(4)`
 
-## 📝 API Endpoints
+## API Endpoints
 
 ### Ordens
-- `POST /api/orders/purchase` - Criar compra
-- `POST /api/orders/sale` - Criar venda
+- `POST /api/orders/purchase` - Criar compra (contraparte: fornecedor)
+- `POST /api/orders/sale` - Criar venda (contraparte: cliente)
 - `POST /api/orders/purchase/:id/cancel` - Cancelar compra
 - `POST /api/orders/sale/:id/cancel` - Cancelar venda
 
@@ -132,23 +166,25 @@ Todos os valores monetários, câmbio e peso em:
 ### Cofre
 - `GET /api/vault` - Saldo consolidado
 
-### CRM
+### CRM (Cadastro Flexivel)
 - `GET/POST /api/clients` - Clientes
 - `GET/POST /api/suppliers` - Fornecedores
 
 ### Extrato
 - `GET /api/ledger` - Timeline de transações
 
-## 🛠️ Desenvolvimento
+## Desenvolvimento
 
 ### Compilar TypeScript
 ```bash
 npm run build
+npm --prefix web run build
 ```
 
-### Iniciar em produção
+### Iniciar em producao
 ```bash
 npm start
+npm --prefix web run start
 ```
 
 ### Estrutura de splits em ordem
@@ -162,36 +198,36 @@ npm start
 }
 ```
 
-## 📊 Exemplo: Fluxo de Compra
+## Exemplo: Fluxo de Compra
 
-1. Admin insere taxa do dia (ouro por grama, USD->SRD, EUR->SRD)
-2. Operador seleciona cliente
-3. Entrar peso bruto, peso líquido, pureza
-4. Sistema calcula automaticamente ouro fino e total em SRD
+1. Admin insere taxa do dia (ouro por grama USD, USD->SRD, EUR->USD)
+2. Operador seleciona fornecedor (ou marca avulso)
+3. Informa peso fisico, pureza e preco negociado por grama
+4. Sistema calcula total em USD e permite ajuste fino controlado
 5. Operador distribui pagamento em split (USD/EUR/SRD)
-6. Botão finalizar só ativa quando split soma exatamente o total
-7. Ordem finalizada, cofre atualizado atomicamente
+6. Finalizacao exige split fechando exatamente o total
+7. Ordem finalizada e cofre atualizado atomicamente
 
-## 🔄 Exemplo: Fluxo de Venda com Lucro
+## Exemplo: Fluxo de Venda com Lucro
 
-1. Operador seleciona fornecedor
-2. Insere peso de ouro fino a vender e valor negociado em SRD
+1. Operador seleciona cliente (ou marca avulso)
+2. Informa peso fisico, pureza e valor negociado em USD
 3. Operador distribui recebimento em split (USD/EUR/SRD)
 4. Sistema calcula custo médio do ouro em aberto
-5. Calcula lucro = valor_negociado - (custo_médio * quantidade_vendida)
+5. Calcula lucro em USD e projecao em SRD
 6. Ordem finalizada, ouro saído do cofre
 
-## 📌 Notas Importantes
+## Notas Importantes
 
 - Sem integração externa de preço; admin insere manualmente
 - Cada ordem leva snapshot de taxa/preço daquele momento
 - Cancelamento é estorno contábil, não deletar do banco
-- Ouro em aberto é pool FIFO para cálculo de média ponderada
+- Ouro em aberto usa media ponderada de custo para apuracao de resultado
 
-## 🤝 Contribuindo
+## Contribuindo
 
 Fork, crie branch feature e submeta PR.
 
-## 📄 Licença
+## Licenca
 
 Proprietário - Casa de Compra e Venda de Ouro, Suriname

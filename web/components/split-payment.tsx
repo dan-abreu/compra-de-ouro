@@ -16,27 +16,37 @@ export function SplitPaymentEditor({
   onChange,
   usdToSrdRate,
   eurToSrdRate,
-  targetSrd
+  targetAmount,
+  targetCurrency = "SRD"
 }: {
   splits: Split[];
   onChange: (next: Split[]) => void;
   usdToSrdRate: string;
   eurToSrdRate: string;
-  targetSrd: string;
+  targetAmount: string;
+  targetCurrency?: "SRD" | "USD";
 }) {
-  const convertedTotal = useMemo(() => {
+  const convertedTotalInTarget = useMemo(() => {
     const usdRate = q4(usdToSrdRate || "0");
     const eurRate = q4(eurToSrdRate || "0");
 
     return splits.reduce((acc, split) => {
       const amount = q4(split.amount || "0");
-      if (split.currency === "SRD") return q4(acc.add(amount));
-      if (split.currency === "USD") return q4(acc.add(amount.mul(usdRate)));
-      return q4(acc.add(amount.mul(eurRate)));
-    }, D(0));
-  }, [splits, usdToSrdRate, eurToSrdRate]);
+      if (targetCurrency === "SRD") {
+        if (split.currency === "SRD") return q4(acc.add(amount));
+        if (split.currency === "USD") return q4(acc.add(amount.mul(usdRate)));
+        return q4(acc.add(amount.mul(eurRate)));
+      }
 
-  const exactMatch = q4(targetSrd || "0").equals(convertedTotal);
+      if (usdRate.lte(0)) return acc;
+
+      if (split.currency === "USD") return q4(acc.add(amount));
+      if (split.currency === "SRD") return q4(acc.add(amount.div(usdRate)));
+      return q4(acc.add(amount.mul(eurRate).div(usdRate)));
+    }, D(0));
+  }, [splits, usdToSrdRate, eurToSrdRate, targetCurrency]);
+
+  const exactMatch = q4(targetAmount || "0").equals(convertedTotalInTarget);
 
   return (
     <div className="space-y-3">
@@ -87,8 +97,8 @@ export function SplitPaymentEditor({
       </button>
 
       <div className="rounded-xl border border-stone-300 bg-white/90 p-3 text-sm">
-        <p>Total convertido SRD: <strong>{format4(convertedTotal)}</strong></p>
-        <p>Alvo SRD: <strong>{format4(targetSrd || "0")}</strong></p>
+        <p>Total convertido {targetCurrency}: <strong>{format4(convertedTotalInTarget)}</strong></p>
+        <p>Alvo {targetCurrency}: <strong>{format4(targetAmount || "0")}</strong></p>
         <p className={exactMatch ? "font-semibold text-emerald-700" : "font-semibold text-red-700"}>
           {exactMatch ? "Split confere exatamente" : "Split divergente"}
         </p>

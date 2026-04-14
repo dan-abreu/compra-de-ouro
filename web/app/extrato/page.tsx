@@ -11,12 +11,15 @@ type Entry = {
   kind: "PURCHASE" | "SALE";
   createdAt: string;
   status: "FINALIZED" | "CANCELED";
-  fineGoldWeight: string;
+  physicalWeight: string;
   movementUsd: string;
   movementEur: string;
   movementSrd: string;
+  revenueUsd?: string;
   revenueSrd: string;
+  costUsd?: string;
   costSrd: string;
+  profitUsd?: string;
   profitSrd: string;
 };
 
@@ -28,7 +31,7 @@ export default function ExtratoPage() {
       .then((rows) => {
         const withMovements = rows.map((row) => ({
           ...row,
-          movementUsd: "0.0000",
+          movementUsd: row.kind === "PURCHASE" ? `-${row.costUsd ?? "0.0000"}` : row.revenueUsd ?? "0.0000",
           movementEur: "0.0000",
           movementSrd: row.kind === "PURCHASE" ? `-${row.costSrd}` : row.revenueSrd
         }));
@@ -43,7 +46,9 @@ export default function ExtratoPage() {
 
   const cancelEntry = (id: string) => {
     setEntries((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: "CANCELED", profitSrd: "0.0000" } : item))
+      prev.map((item) =>
+        item.id === id ? { ...item, status: "CANCELED", profitSrd: "0.0000", profitUsd: "0.0000" } : item
+      )
     );
   };
 
@@ -73,12 +78,12 @@ export default function ExtratoPage() {
                 <td className="px-2 py-2 font-semibold">{row.id}</td>
                 <td className="px-2 py-2">{row.kind}</td>
                 <td className="px-2 py-2">{row.status}</td>
-                <td className="px-2 py-2">{row.kind === "PURCHASE" ? `+${format4(row.fineGoldWeight)}` : `-${format4(row.fineGoldWeight)}`}</td>
+                <td className="px-2 py-2">{row.kind === "PURCHASE" ? `+${format4(row.physicalWeight)}` : `-${format4(row.physicalWeight)}`}</td>
                 <td className="px-2 py-2">{format4(row.movementUsd)}</td>
                 <td className="px-2 py-2">{format4(row.movementEur)}</td>
                 <td className="px-2 py-2">{format4(row.movementSrd)}</td>
-                <td className="px-2 py-2">{format4(row.costSrd)}</td>
-                <td className="px-2 py-2 font-semibold text-emerald-700">{format4(row.profitSrd)}</td>
+                <td className="px-2 py-2">USD {format4(row.costUsd ?? "0")}</td>
+                <td className="px-2 py-2 font-semibold text-emerald-700">USD {format4(row.profitUsd ?? "0")}</td>
                 <td className="px-2 py-2">
                   <button
                     className="rounded-lg bg-stone-900 px-2 py-1 text-xs font-semibold text-amber-100 disabled:cursor-not-allowed disabled:bg-stone-300"

@@ -7,9 +7,9 @@ import { apiRequest } from "@/lib/api";
 import { format4 } from "@/lib/decimal";
 
 type Vault = {
-  physicalGoldFineWeight: string;
-  openGoldFineWeight: string;
-  openGoldAcquisitionCostSrd: string;
+  balanceGoldGrams: string;
+  openGoldGrams: string;
+  openGoldAcquisitionCostUsd: string;
   balanceSrd: string;
   balanceUsd: string;
   balanceEur: string;
@@ -18,9 +18,9 @@ type Vault = {
 type DailyRate = {
   id: string;
   rateDate: string;
-  goldPricePerGram: string;
+  goldPricePerGramUsd: string;
   usdToSrdRate: string;
-  eurToSrdRate: string;
+  eurToUsdRate: string;
 };
 
 export default function DashboardPage() {
@@ -30,9 +30,9 @@ export default function DashboardPage() {
   const [form, setForm] = useState({
     rateDate: new Date().toISOString().slice(0, 10),
     createdById: "",
-    goldPricePerGram: "",
+    goldPricePerGramUsd: "",
     usdToSrdRate: "",
-    eurToSrdRate: ""
+    eurToUsdRate: ""
   });
 
   const load = async () => {
@@ -67,7 +67,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Saldo do Cofre">
           <div className="grid gap-3 md:grid-cols-2">
-            <LabeledValue label="Ouro fisico (g fino)" value={format4(vault?.physicalGoldFineWeight ?? "0")} />
+            <LabeledValue label="Ouro fisico (g)" value={format4(vault?.balanceGoldGrams ?? "0")} />
             <LabeledValue label="SRD" value={format4(vault?.balanceSrd ?? "0")} />
             <LabeledValue label="USD" value={format4(vault?.balanceUsd ?? "0")} />
             <LabeledValue label="EUR" value={format4(vault?.balanceEur ?? "0")} />
@@ -76,17 +76,17 @@ export default function DashboardPage() {
 
         <Card title="Ouro em Aberto">
           <div className="space-y-2 text-sm">
-            <p><strong>Peso em aberto:</strong> {format4(vault?.openGoldFineWeight ?? "0")} g</p>
-            <p><strong>Custo em aberto:</strong> SRD {format4(vault?.openGoldAcquisitionCostSrd ?? "0")}</p>
+            <p><strong>Peso em aberto:</strong> {format4(vault?.openGoldGrams ?? "0")} g</p>
+            <p><strong>Custo em aberto:</strong> USD {format4(vault?.openGoldAcquisitionCostUsd ?? "0")}</p>
           </div>
         </Card>
 
         <Card title="Snapshot Atual">
           <div className="space-y-2 text-sm">
             <p><strong>Data:</strong> {rate?.rateDate?.slice(0, 10) ?? "-"}</p>
-            <p><strong>Ouro por grama:</strong> {format4(rate?.goldPricePerGram ?? "0")}</p>
+            <p><strong>Ouro por grama (USD):</strong> {format4(rate?.goldPricePerGramUsd ?? "0")}</p>
             <p><strong>USD {"->"} SRD:</strong> {format4(rate?.usdToSrdRate ?? "0")}</p>
-            <p><strong>EUR {"->"} SRD:</strong> {format4(rate?.eurToSrdRate ?? "0")}</p>
+            <p><strong>EUR {"->"} USD:</strong> {format4(rate?.eurToUsdRate ?? "0")}</p>
           </div>
         </Card>
       </div>
@@ -117,8 +117,8 @@ export default function DashboardPage() {
             Preco ouro por grama
             <input
               type="text"
-              value={form.goldPricePerGram}
-              onChange={(event) => setForm({ ...form, goldPricePerGram: event.target.value })}
+              value={form.goldPricePerGramUsd}
+              onChange={(event) => setForm({ ...form, goldPricePerGramUsd: event.target.value })}
               placeholder="0.0000"
               required
             />
@@ -136,11 +136,11 @@ export default function DashboardPage() {
           </label>
 
           <label className="md:col-span-2">
-            EUR {"->"} SRD
+            EUR {"->"} USD
             <input
               type="text"
-              value={form.eurToSrdRate}
-              onChange={(event) => setForm({ ...form, eurToSrdRate: event.target.value })}
+              value={form.eurToUsdRate}
+              onChange={(event) => setForm({ ...form, eurToUsdRate: event.target.value })}
               placeholder="0.0000"
               required
             />
