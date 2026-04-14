@@ -27,13 +27,6 @@ export default function DashboardPage() {
   const [vault, setVault] = useState<Vault | null>(null);
   const [rate, setRate] = useState<DailyRate | null>(null);
   const [message, setMessage] = useState("");
-  const [form, setForm] = useState({
-    rateDate: new Date().toISOString().slice(0, 10),
-    createdById: "",
-    goldPricePerGramUsd: "",
-    usdToSrdRate: "",
-    eurToUsdRate: ""
-  });
 
   const load = async () => {
     const [vaultData, latestRate] = await Promise.all([
@@ -49,21 +42,9 @@ export default function DashboardPage() {
     load().catch(() => setMessage("Nao foi possivel carregar dados iniciais."));
   }, []);
 
-  const submitRate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setMessage("");
-
-    try {
-      await apiRequest("/rates", "POST", form);
-      setMessage("Taxa do dia registrada com sucesso.");
-      await load();
-    } catch {
-      setMessage("Falha ao salvar taxa do dia.");
-    }
-  };
-
   return (
     <div className="space-y-4">
+      {message ? <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900">{message}</p> : null}
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Saldo do Cofre">
           <div className="grid gap-3 md:grid-cols-2">
@@ -90,68 +71,6 @@ export default function DashboardPage() {
           </div>
         </Card>
       </div>
-
-      <Card title="Atualizar Taxas Manuais do Dia (Admin)">
-        <form className="grid gap-3 md:grid-cols-2" onSubmit={submitRate}>
-          <label>
-            Data
-            <input
-              type="date"
-              value={form.rateDate}
-              onChange={(event) => setForm({ ...form, rateDate: event.target.value })}
-            />
-          </label>
-
-          <label>
-            ID do Admin (createdById)
-            <input
-              type="text"
-              value={form.createdById}
-              onChange={(event) => setForm({ ...form, createdById: event.target.value })}
-              placeholder="user_id"
-              required
-            />
-          </label>
-
-          <label>
-            Preco ouro por grama
-            <input
-              type="text"
-              value={form.goldPricePerGramUsd}
-              onChange={(event) => setForm({ ...form, goldPricePerGramUsd: event.target.value })}
-              placeholder="0.0000"
-              required
-            />
-          </label>
-
-          <label>
-            USD {"->"} SRD
-            <input
-              type="text"
-              value={form.usdToSrdRate}
-              onChange={(event) => setForm({ ...form, usdToSrdRate: event.target.value })}
-              placeholder="0.0000"
-              required
-            />
-          </label>
-
-          <label className="md:col-span-2">
-            EUR {"->"} USD
-            <input
-              type="text"
-              value={form.eurToUsdRate}
-              onChange={(event) => setForm({ ...form, eurToUsdRate: event.target.value })}
-              placeholder="0.0000"
-              required
-            />
-          </label>
-
-          <button className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-stone-700 md:col-span-2">
-            Salvar taxa
-          </button>
-        </form>
-        {message ? <p className="mt-3 text-sm font-medium text-stone-700">{message}</p> : null}
-      </Card>
     </div>
   );
 }
