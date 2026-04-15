@@ -3,11 +3,11 @@
 import Decimal from "decimal.js";
 import { useEffect, useMemo, useState } from "react";
 
-import { PriceSuggestionBreakdown } from "@/components/PriceSuggestionBreakdown";
 import { TradePartyOption, TradePartySelector } from "@/components/TradePartySelector";
 import { TreasurySplitPlanner } from "@/components/TreasurySplitPlanner";
 import { Card, LabeledValue } from "@/components/ui";
 import { ApiError, apiRequest } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { AML_KYC_THRESHOLD_USD, REQUIRE_KYC_ABOVE_10K } from "@/lib/complianceConfig";
 import { format4 } from "@/lib/decimal";
 import {
@@ -25,17 +25,57 @@ import {
 } from "@/lib/treasury";
 
 type DailyRate = {
-  id: string;
   rateDate: string;
   goldPricePerGramUsd: string;
   usdToSrdRate: string;
   eurToUsdRate: string;
+  fetchedAt?: string;
+  sourceMode?: "external-live" | "database-fallback";
+  sources?: Array<{
+    symbol: string;
+    provider: string;
+    url: string;
+    note: string;
+  }>;
 };
 
 export function PurchasePage() {
+  const auth = useAuthStore();
+  type PurchasePayload = {
+    clientId?: string;
+    isWalkIn: boolean;
+    goldState: "BURNED" | "MELTED";
+    physicalWeight: string;
+    purityPercentage: string;
+    negotiatedPricePerGram: string;
+    totalOrderValueUsd: string;
+    paymentSplits: Array<{
+      currency: string;
+      amount: string;
+      manualExchangeRate?: string;
+    }>;
+  };
+
+  type PurchaseAuditPayload = {
+    clientId?: string;
+    isWalkIn: boolean;
+    goldState: "BURNED" | "MELTED";
+    physicalWeight: string;
+    purityPercentage: string;
+    negotiatedPricePerGram: string;
+    totalOrderValueUsd: string;
+    paymentSplits: Array<{
+      currency: string;
+      splitPercentage: string;
+      splitAmountUsd: string;
+      manualExchangeRate: string | null;
+      settlementAmount: string;
+    }>;
+  };
+
   const [goldState, setGoldState] = useState<"BURNED" | "MELTED">("BURNED");
-  const [selectedSupplier, setSelectedSupplier] = useState<TradePartyOption | null>(null);
-  const [supplierCount, setSupplierCount] = useState(0);
+  const [selectedClient, setSelectedClient] = useState<TradePartyOption | null>(null);
+  const [clientCount, setClientCount] = useState(0);
   const [rate, setRate] = useState<DailyRate | null>(null);
   const [message, setMessage] = useState("");
   const [globalError, setGlobalError] = useState("");
@@ -43,26 +83,26 @@ export function PurchasePage() {
   const [isWalkIn, setIsWalkIn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [activeModal, setActiveModal] = useState<null | "compliance" | "receipt">(null);
+  const [pendingPayload, setPendingPayload] = useState<PurchasePayload | null>(null);
+  const [pendingAuditPayload, setPendingAuditPayload] = useState<PurchaseAuditPayload | null>(null);
   const [form, setForm] = useState({
-    supplierId: "",
-    createdById: "",
+    clientId: "",
     physicalWeight: "",
     purityPercentage: "",
-    spotPriceOz: "",
     negotiatedPricePerGramUsd: ""
   });
   const [paymentLines, setPaymentLines] = useState<PaymentLine[]>([createAutofilledPaymentLine(1, null, ZERO, [])]);
-  const [totalOrderValueUsdInput, setTotalOrderValueUsdInput] = useState("0.0000");
-  const [hasManualTotalOverride, setHasManualTotalOverride] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const latestRate = await apiRequest<DailyRate>("/rates/latest", "GET");
+        const latestRate = await apiRequest<DailyRate>("/rates/market-live", "GET");
         setRate(latestRate);
         setPaymentLines([createAutofilledPaymentLine(1, latestRate, ZERO, [])]);
       } catch {
-        setGlobalError("Nao foi possivel carregar taxa diaria.");
+        setRate(null);
+        setPaymentLines([createAutofilledPaymentLine(1, null, ZERO, [])]);
       } finally {
         setLoading(false);
       }
@@ -76,17 +116,11 @@ export function PurchasePage() {
     () => parseDecimal(form.physicalWeight).mul(negotiatedPricePerGramUsd).toDecimalPlaces(4, Decimal.ROUND_HALF_UP),
     [form.physicalWeight, negotiatedPricePerGramUsd]
   );
-  const totalOrderValueUsd = useMemo(() => parseDecimal(totalOrderValueUsdInput).toDecimalPlaces(4, Decimal.ROUND_HALF_UP), [totalOrderValueUsdInput]);
+  const totalOrderValueUsd = useMemo(() => calculatedOrderValueUsd, [calculatedOrderValueUsd]);
   const paymentPreview = useMemo(() => calculatePaymentPreview(paymentLines, totalOrderValueUsd), [paymentLines, totalOrderValueUsd]);
   const totalSplitAmountUsd = useMemo(() => calculateTotalAmountUsd(paymentLines), [paymentLines]);
   const splitDeltaUsd = useMemo(() => totalOrderValueUsd.sub(totalSplitAmountUsd).toDecimalPlaces(4, Decimal.ROUND_HALF_UP), [totalOrderValueUsd, totalSplitAmountUsd]);
   const amountAlert = useMemo(() => buildAmountAlert(totalSplitAmountUsd, totalOrderValueUsd), [totalSplitAmountUsd, totalOrderValueUsd]);
-
-  useEffect(() => {
-    if (!hasManualTotalOverride) {
-      setTotalOrderValueUsdInput(decimalText(calculatedOrderValueUsd));
-    }
-  }, [calculatedOrderValueUsd, hasManualTotalOverride]);
 
   useEffect(() => {
     setPaymentLines((current) => current.map((line) => syncLineWithTotal(line, totalOrderValueUsd)));
@@ -98,14 +132,88 @@ export function PurchasePage() {
   const canFinalize =
     splitDeltaUsd.eq(ZERO) &&
     !hasSplitErrors &&
-    (isWalkIn || form.supplierId.trim() !== "") &&
-    form.createdById.trim() !== "" &&
+    (isWalkIn || form.clientId.trim() !== "") &&
     form.physicalWeight.trim() !== "" &&
     form.purityPercentage.trim() !== "" &&
     form.negotiatedPricePerGramUsd.trim() !== "" &&
     totalOrderValueUsd.gt(0) &&
-    !complianceBlocked &&
-    !!rate;
+    !complianceBlocked;
+
+  const validateOrder = () => {
+    if (complianceBlocked) {
+      setGlobalError("KYC obrigatorio para avulso acima de USD 10.000,00 com a politica atual.");
+      return false;
+    }
+
+    if (!canFinalize) {
+      setGlobalError("A compra so pode ser finalizada quando a soma exata dos splits em USD fechar o total da ordem e todos os campos obrigatorios estiverem preenchidos.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const buildPayloads = (): { normalizedPayload: PurchasePayload; treasuryAuditPayload: PurchaseAuditPayload } => {
+    const normalizedPayload: PurchasePayload = {
+      clientId: isWalkIn ? undefined : form.clientId,
+      isWalkIn,
+      goldState,
+      physicalWeight: format4(form.physicalWeight),
+      purityPercentage: format4(form.purityPercentage),
+      negotiatedPricePerGram: format4(form.negotiatedPricePerGramUsd),
+      totalOrderValueUsd: decimalText(totalOrderValueUsd),
+      paymentSplits: paymentLines.map((line) => {
+        const preview = paymentPreview.find((item) => item.id === line.id);
+        return {
+          currency: line.currency,
+          amount: preview ? decimalText(preview.settlementAmount) : "0.0000",
+          manualExchangeRate: line.currency === "USD" ? undefined : format4(line.manualExchangeRate || "0")
+        };
+      })
+    };
+
+    const treasuryAuditPayload: PurchaseAuditPayload = {
+      ...normalizedPayload,
+      totalOrderValueUsd: decimalText(totalOrderValueUsd),
+      paymentSplits: paymentLines.map((line) => {
+        const preview = paymentPreview.find((item) => item.id === line.id);
+        return {
+          currency: line.currency,
+          splitPercentage: format4(line.splitPercentage || "0"),
+          splitAmountUsd: format4(line.splitAmountUsd || "0"),
+          manualExchangeRate: line.currency === "USD" ? null : format4(line.manualExchangeRate || "0"),
+          settlementAmount: preview ? decimalText(preview.settlementAmount) : "0.0000"
+        };
+      })
+    };
+
+    return { normalizedPayload, treasuryAuditPayload };
+  };
+
+  const confirmAndSubmit = async () => {
+    if (!pendingPayload) {
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await apiRequest("/orders/purchase", "POST", pendingPayload);
+      setMessage("Compra finalizada com sucesso.");
+      resetForm();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setGlobalError(error.message);
+        setFieldErrors(error.fieldErrors);
+      } else {
+        setGlobalError("Falha ao finalizar compra.");
+      }
+    } finally {
+      setSubmitting(false);
+      setActiveModal(null);
+      setPendingPayload(null);
+      setPendingAuditPayload(null);
+    }
+  };
 
   const setLine = (lineId: string, field: keyof PaymentLine, value: string) => {
     setPaymentLines((current) =>
@@ -137,18 +245,14 @@ export function PurchasePage() {
 
   const resetForm = () => {
     setForm({
-      supplierId: "",
-      createdById: "",
+      clientId: "",
       physicalWeight: "",
       purityPercentage: "",
-      spotPriceOz: "",
       negotiatedPricePerGramUsd: ""
     });
-    setSelectedSupplier(null);
+    setSelectedClient(null);
     setIsWalkIn(false);
     setPaymentLines([createAutofilledPaymentLine(1, rate, ZERO, [])]);
-    setTotalOrderValueUsdInput("0.0000");
-    setHasManualTotalOverride(false);
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -157,67 +261,17 @@ export function PurchasePage() {
     setGlobalError("");
     setFieldErrors({});
 
-    if (complianceBlocked) {
-      setGlobalError("KYC obrigatorio para avulso acima de USD 10.000,00 com a politica atual.");
+    if (!validateOrder()) {
       return;
     }
 
-    if (!canFinalize || !rate) {
-      setGlobalError("A compra so pode ser finalizada quando a soma exata dos splits em USD fechar o total da ordem.");
-      return;
-    }
-
-    const normalizedPayload = {
-      supplierId: isWalkIn ? undefined : form.supplierId,
-      isWalkIn,
-      createdById: form.createdById,
-      dailyRateId: rate.id,
-      goldState,
-      physicalWeight: format4(form.physicalWeight),
-      purityPercentage: format4(form.purityPercentage),
-      negotiatedPricePerGram: format4(form.negotiatedPricePerGramUsd),
-      totalOrderValueUsd: decimalText(totalOrderValueUsd),
-      paymentSplits: paymentLines.map((line) => {
-        const preview = paymentPreview.find((item) => item.id === line.id);
-        return {
-          currency: line.currency,
-          amount: preview ? decimalText(preview.settlementAmount) : "0.0000"
-        };
-      })
-    };
-
-    const treasuryAuditPayload = {
-      ...normalizedPayload,
-      totalOrderValueUsd: decimalText(totalOrderValueUsd),
-      paymentSplits: paymentLines.map((line) => {
-        const preview = paymentPreview.find((item) => item.id === line.id);
-        return {
-          currency: line.currency,
-          splitPercentage: format4(line.splitPercentage || "0"),
-          splitAmountUsd: format4(line.splitAmountUsd || "0"),
-          manualExchangeRate: line.currency === "USD" ? null : format4(line.manualExchangeRate || "0"),
-          settlementAmount: preview ? decimalText(preview.settlementAmount) : "0.0000"
-        };
-      })
-    };
+    const { normalizedPayload, treasuryAuditPayload } = buildPayloads();
+    setPendingPayload(normalizedPayload);
+    setPendingAuditPayload(treasuryAuditPayload);
 
     console.log("PurchaseOrderService payload", treasuryAuditPayload);
 
-    try {
-      setSubmitting(true);
-      await apiRequest("/orders/purchase", "POST", normalizedPayload);
-      setMessage("Compra finalizada com sucesso.");
-      resetForm();
-    } catch (error) {
-      if (error instanceof ApiError) {
-        setGlobalError(error.message);
-        setFieldErrors(error.fieldErrors);
-      } else {
-        setGlobalError("Falha ao finalizar compra.");
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    setActiveModal(needsSoftComplianceWarning ? "compliance" : "receipt");
   };
 
   const fieldError = (field: string) => fieldErrors[field];
@@ -241,34 +295,29 @@ export function PurchasePage() {
                         onChange={(event) => {
                           setIsWalkIn(event.target.checked);
                           if (event.target.checked) {
-                            setForm((current) => ({ ...current, supplierId: "" }));
-                            setSelectedSupplier(null);
+                            setForm((current) => ({ ...current, clientId: "" }));
+                            setSelectedClient(null);
                           }
                         }}
                       />
-                      Avulso
+                      Cliente Avulso
                     </label>
                   </div>
                   <TradePartySelector
-                    type="SUPPLIER"
-                    label="Fornecedor"
-                    value={form.supplierId}
+                    type="CLIENT"
+                    label="Cliente"
+                    value={form.clientId}
                     disabled={isWalkIn}
-                    placeholder={isWalkIn ? "Atendimento avulso" : "Buscar fornecedor"}
-                    emptyText="Nenhum fornecedor encontrado."
-                    errorMessage={fieldError("supplierId")}
-                    onOptionsLoaded={setSupplierCount}
+                    placeholder={isWalkIn ? "Cliente Avulso" : "Buscar cliente"}
+                    emptyText="Nenhum cliente encontrado."
+                    errorMessage={fieldError("clientId")}
+                    onOptionsLoaded={setClientCount}
                     onChange={(option) => {
-                      setSelectedSupplier(option);
-                      setForm((current) => ({ ...current, supplierId: option?.id ?? "" }));
+                      setSelectedClient(option);
+                      setForm((current) => ({ ...current, clientId: option?.id ?? "" }));
                     }}
                   />
                 </div>
-                <label className="xl:col-span-2">
-                  ID do Operador de Caixa
-                  <input value={form.createdById} onChange={(event) => setForm({ ...form, createdById: event.target.value })} required />
-                  {fieldError("createdById") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("createdById")}</p> : null}
-                </label>
               </div>
             </div>
 
@@ -287,68 +336,31 @@ export function PurchasePage() {
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label>
+              <label className="text-xs font-medium text-stone-700">
                 {goldState === "BURNED" ? "Peso do Ouro Queimado (g)" : "Peso do Ouro Fundido (g)"}
                 <input value={form.physicalWeight} onChange={(event) => setForm({ ...form, physicalWeight: event.target.value })} required />
                 {fieldError("physicalWeight") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("physicalWeight")}</p> : null}
               </label>
-              <label>
+              <label className="text-xs font-medium text-stone-700">
                 Teor de Pureza (%)
                 <input value={form.purityPercentage} onChange={(event) => setForm({ ...form, purityPercentage: event.target.value })} required />
                 {fieldError("purityPercentage") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("purityPercentage")}</p> : null}
               </label>
+              <label className="text-xs font-medium text-stone-700">
+                Preço da Grama da Ordem (USD)
+                <input
+                  value={form.negotiatedPricePerGramUsd}
+                  onChange={(event) => setForm({ ...form, negotiatedPricePerGramUsd: event.target.value })}
+                  required
+                />
+                <p className="mt-1 text-xs text-stone-600">Use o preço da bolsa no painel da direita como referência e ajuste para esta ordem.</p>
+                {fieldError("negotiatedPricePerGram") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("negotiatedPricePerGram")}</p> : null}
+              </label>
             </div>
 
-            <div className="rounded-2xl border border-stone-300/70 bg-white/75 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-heading text-base font-semibold text-stone-800">Avaliação e Preço Negociado</h3>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Moeda Base USD</span>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label>
-                  Preço Spot da Onça (Referência Bolsa)
-                  <input value={form.spotPriceOz} onChange={(event) => setForm({ ...form, spotPriceOz: event.target.value })} placeholder="Ex: 2300.0000" />
-                </label>
-                <label>
-                  Preço Negociado por Grama (USD)
-                  <input value={form.negotiatedPricePerGramUsd} onChange={(event) => setForm({ ...form, negotiatedPricePerGramUsd: event.target.value })} required />
-                  {fieldError("negotiatedPricePerGram") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("negotiatedPricePerGram")}</p> : null}
-                </label>
-                <div className="md:col-span-2">
-                  <PriceSuggestionBreakdown spotPriceOz={form.spotPriceOz} purityPercentage={form.purityPercentage} />
-                </div>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                <label>
-                  Valor Total da Ordem (USD)
-                  <input
-                    value={totalOrderValueUsdInput}
-                    onChange={(event) => {
-                      setHasManualTotalOverride(true);
-                      setTotalOrderValueUsdInput(event.target.value);
-                    }}
-                    required
-                  />
-                  <p className="mt-1 text-xs text-stone-600">
-                    Preenchido automaticamente por Peso do Ouro Queimado x Preco Negociado, com ajuste manual opcional de centavos.
-                  </p>
-                  {fieldError("totalOrderValueUsd") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("totalOrderValueUsd")}</p> : null}
-                </label>
-                <button
-                  type="button"
-                  className="rounded-2xl border border-stone-300 px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-                  onClick={() => {
-                    setHasManualTotalOverride(false);
-                    setTotalOrderValueUsdInput(decimalText(calculatedOrderValueUsd));
-                  }}
-                >
-                  Usar calculo automatico
-                </button>
-              </div>
-            </div>
             {needsSoftComplianceWarning ? (
               <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <p className="font-semibold">Compliance: atendimento avulso acima de USD 10.000,00.</p>
+                <p className="font-semibold">Compliance: cliente avulso acima de USD 10.000,00.</p>
                 <p className="mt-1 text-xs">
                   {REQUIRE_KYC_ABOVE_10K
                     ? "Politica atual exige KYC e bloqueia finalizacao sem cadastro."
@@ -377,7 +389,7 @@ export function PurchasePage() {
             />
             {fieldError("paymentSplits") ? <p className="-mt-2 text-xs font-semibold text-red-700">{fieldError("paymentSplits")}</p> : null}
 
-            <button disabled={!canFinalize || submitting} className={`rounded-2xl px-5 py-3 text-sm font-semibold ${canFinalize && !submitting ? "bg-emerald-700 text-white hover:bg-emerald-600" : "cursor-not-allowed bg-stone-300 text-stone-600"}`}>
+            <button disabled={submitting} className={`rounded-2xl px-5 py-3 text-sm font-semibold ${!submitting ? "bg-emerald-700 text-white hover:bg-emerald-600" : "cursor-not-allowed bg-stone-300 text-stone-600"}`}>
               {submitting ? "Processando Transacao..." : "Finalizar Compra"}
             </button>
           </form>
@@ -386,25 +398,111 @@ export function PurchasePage() {
         <div className="space-y-4">
           <Card title="Snapshot de Mercado">
             <div className="grid gap-3">
-              <LabeledValue label="Preço do Ouro por Grama (USD)" value={`USD ${rate ? format4(rate.goldPricePerGramUsd) : "0.0000"}`} />
+              <LabeledValue label="Preço da Grama (USD) em Tempo Real" value={`USD ${rate ? format4(rate.goldPricePerGramUsd) : "0.0000"}`} />
               <LabeledValue label="Taxa USD para SRD" value={rate ? format4(rate.usdToSrdRate) : "0.0000"} />
               <LabeledValue label="Taxa EUR para USD" value={rate ? format4(rate.eurToUsdRate) : "0.0000"} />
-              <LabeledValue label="Data da Cotação" value={rate?.rateDate?.slice(0, 10) ?? "-"} />
+              <LabeledValue label="Atualizado em" value={rate?.fetchedAt ? new Date(rate.fetchedAt).toLocaleString("pt-BR") : "-"} />
+              <LabeledValue label="Origem" value={rate?.sourceMode === "external-live" ? "Bolsa/API externa ao vivo" : rate ? "Fallback base local" : "-"} />
             </div>
           </Card>
 
           <Card title="Resumo Operacional">
             <div className="space-y-3 text-sm text-stone-700">
-              <p><strong>Fornecedores carregados:</strong> {loading ? "carregando" : supplierCount}</p>
-              <p><strong>Modo da ordem:</strong> {isWalkIn ? "Atendimento avulso" : "Fornecedor cadastrado"}</p>
-              <p><strong>Fornecedor selecionado:</strong> {selectedSupplier?.displayName ?? "-"}</p>
-              <p><strong>Documento:</strong> {selectedSupplier?.documentId ?? "-"}</p>
+              <p><strong>Clientes carregados:</strong> {loading ? "carregando" : clientCount}</p>
+              <p><strong>Modo da ordem:</strong> {isWalkIn ? "Cliente Avulso" : "Cliente cadastrado"}</p>
+              <p><strong>Cliente selecionado:</strong> {selectedClient?.displayName ?? "-"}</p>
+              <p><strong>Origem declarada:</strong> {selectedClient?.goldOrigin ?? "-"}</p>
               <p><strong>Linhas de payout:</strong> {paymentLines.length}</p>
               <p><strong>Status do rateio:</strong> {splitDeltaUsd.eq(ZERO) ? "Fechado no valor exato" : "Aguardando ajuste de centavos"}</p>
             </div>
           </Card>
         </div>
       </div>
+
+      {activeModal ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 px-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-stone-300 bg-white p-5 shadow-2xl">
+            {activeModal === "compliance" ? (
+              <>
+                <h3 className="font-heading text-lg font-semibold text-stone-900">Atenção de Compliance</h3>
+                <p className="mt-2 text-sm text-stone-700">
+                  Esta compra está acima de USD 10.000,00 em modo avulso. Deseja continuar para conferência final ou cancelar agora?
+                </p>
+                <div className="mt-5 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100"
+                    onClick={() => {
+                      setActiveModal(null);
+                      setPendingPayload(null);
+                      setPendingAuditPayload(null);
+                    }}
+                  >
+                    Cancelar operação
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
+                    onClick={() => setActiveModal("receipt")}
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="font-heading text-lg font-semibold text-stone-900">Recibo de Conferência da Compra</h3>
+                <div className="mt-3 max-h-[60vh] space-y-4 overflow-y-auto rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm">
+                  <p><strong>Operador:</strong> {auth.userName ?? "-"}</p>
+                  <p><strong>Contraparte:</strong> {isWalkIn ? "Cliente Avulso" : selectedClient?.displayName ?? "-"}</p>
+                  <p><strong>Estado do ouro:</strong> {pendingAuditPayload?.goldState ?? "-"}</p>
+                  <p><strong>Peso:</strong> {pendingAuditPayload?.physicalWeight ?? "-"} g</p>
+                  <p><strong>Pureza:</strong> {pendingAuditPayload?.purityPercentage ?? "-"} %</p>
+                  <p><strong>Preço por grama:</strong> USD {pendingAuditPayload?.negotiatedPricePerGram ?? "-"}</p>
+                  <p><strong>Total da ordem:</strong> USD {pendingAuditPayload?.totalOrderValueUsd ?? "-"}</p>
+                  <div>
+                    <p className="mb-2 font-semibold text-stone-800">Rateio de pagamento</p>
+                    <div className="space-y-2">
+                      {pendingAuditPayload?.paymentSplits.map((line, idx) => (
+                        <div key={`${line.currency}-${idx}`} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs">
+                          <p><strong>Moeda:</strong> {line.currency}</p>
+                          <p><strong>%:</strong> {line.splitPercentage}</p>
+                          <p><strong>USD:</strong> {line.splitAmountUsd}</p>
+                          <p><strong>Liquidação:</strong> {line.settlementAmount}</p>
+                          <p><strong>Câmbio manual:</strong> {line.manualExchangeRate ?? "-"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-5 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100"
+                    onClick={() => {
+                      setActiveModal(null);
+                      setPendingPayload(null);
+                      setPendingAuditPayload(null);
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-stone-300"
+                    onClick={() => {
+                      confirmAndSubmit().catch(() => undefined);
+                    }}
+                  >
+                    {submitting ? "Confirmando..." : "Confirmar e finalizar"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

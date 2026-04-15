@@ -113,9 +113,11 @@ export function SuppliersPage() {
           {fieldError("address") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("address")}</p> : null}
         </label>
 
-        <button disabled={saving} className={`rounded-xl px-4 py-2 text-sm font-semibold md:col-span-2 ${saving ? "cursor-not-allowed bg-stone-300 text-stone-600" : "bg-stone-900 text-amber-100 hover:bg-stone-700"}`}>
-          {saving ? "Salvando..." : "Salvar fornecedor"}
-        </button>
+        <div className="md:col-span-2 flex items-center justify-end">
+          <button disabled={saving} className={`rounded-xl px-4 py-2 text-sm font-semibold ${saving ? "cursor-not-allowed bg-stone-300 text-stone-600" : "bg-stone-900 text-amber-100 hover:bg-stone-700"}`}>
+            {saving ? "Salvando..." : "Salvar fornecedor"}
+          </button>
+        </div>
       </form>
 
       <div className="mt-4 overflow-x-auto">

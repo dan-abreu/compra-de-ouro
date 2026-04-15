@@ -17,37 +17,14 @@ const decimalString = z
 
 const splitSchema = z.object({
   currency: z.nativeEnum(Currency),
-  amount: decimalString
+  amount: decimalString,
+  manualExchangeRate: decimalString.optional()
 });
 
 const createPurchaseSchema = z
   .object({
-    supplierId: z.string().min(1).optional(),
-    isWalkIn: z.boolean().optional().default(false),
-    createdById: z.string().min(1),
-    dailyRateId: z.string().min(1).optional(),
-    goldState: z.nativeEnum(GoldState),
-    physicalWeight: decimalString,
-    purityPercentage: decimalString,
-    negotiatedPricePerGram: decimalString,
-    totalOrderValueUsd: decimalString,
-    paymentSplits: z.array(splitSchema).min(1)
-  })
-  .superRefine((data, ctx) => {
-    if (!data.isWalkIn && !data.supplierId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "supplierId is required when isWalkIn is false.",
-        path: ["supplierId"]
-      });
-    }
-  });
-
-const createSalesSchema = z
-  .object({
     clientId: z.string().min(1).optional(),
     isWalkIn: z.boolean().optional().default(false),
-    createdById: z.string().min(1),
     dailyRateId: z.string().min(1).optional(),
     goldState: z.nativeEnum(GoldState),
     physicalWeight: decimalString,
@@ -66,8 +43,29 @@ const createSalesSchema = z
     }
   });
 
+const createSalesSchema = z
+  .object({
+    supplierId: z.string().min(1).optional(),
+    isWalkIn: z.boolean().optional().default(false),
+    dailyRateId: z.string().min(1).optional(),
+    goldState: z.nativeEnum(GoldState),
+    physicalWeight: decimalString,
+    purityPercentage: decimalString,
+    negotiatedPricePerGram: decimalString,
+    totalOrderValueUsd: decimalString,
+    paymentSplits: z.array(splitSchema).min(1)
+  })
+  .superRefine((data, ctx) => {
+    if (!data.isWalkIn && !data.supplierId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "supplierId is required when isWalkIn is false.",
+        path: ["supplierId"]
+      });
+    }
+  });
+
 const cancelSchema = z.object({
-  canceledById: z.string().min(1),
   reason: z.string().max(255).optional()
 });
 
@@ -117,10 +115,18 @@ router.post(
   "/purchase",
   asyncHandler(async (req, res) => {
     const payload = createPurchaseSchema.parse(req.body);
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({
+        message: "Authentication required.",
+        code: "AUTH_REQUIRED",
+        fieldErrors: {}
+      });
+    }
     const order = await purchaseOrderService.create({
-      supplierId: payload.supplierId,
+      clientId: payload.clientId,
       isWalkIn: payload.isWalkIn,
-      createdById: payload.createdById,
+      createdById: userId,
       dailyRateId: payload.dailyRateId,
       goldState: payload.goldState,
       physicalWeight: payload.physicalWeight,
@@ -137,10 +143,18 @@ router.post(
   "/sale",
   asyncHandler(async (req, res) => {
     const payload = createSalesSchema.parse(req.body);
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({
+        message: "Authentication required.",
+        code: "AUTH_REQUIRED",
+        fieldErrors: {}
+      });
+    }
     const order = await salesOrderService.create({
-      clientId: payload.clientId,
+      supplierId: payload.supplierId,
       isWalkIn: payload.isWalkIn,
-      createdById: payload.createdById,
+      createdById: userId,
       dailyRateId: payload.dailyRateId,
       goldState: payload.goldState,
       physicalWeight: payload.physicalWeight,

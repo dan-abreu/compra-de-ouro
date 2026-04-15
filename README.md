@@ -1,233 +1,291 @@
-# Compra de Ouro - ERP/Livro-Caixa
+# Compra de Ouro — ERP Multi-Tenant
 
-SaaS web interno para casa de compra e venda de ouro no Suriname.
-Sistema de rastreabilidade imutavel com contabilidade decimal-only (sem float) e fluxo operacional orientado a caixa.
+SaaS multi-tenant para casas de compra e venda de ouro no Suriname.
+Sistema de rastreabilidade com contabilidade decimal-only (sem float), autenticação JWT por tenant e fluxo operacional orientado a caixa.
 
-## 📋 Stack Tecnológico
+## Stack
 
-- **Back-end**: Node.js + Express + Prisma
-- **Front-end**: React 18 + Next.js 14 + Tailwind CSS
-- **Banco de Dados**: PostgreSQL com Decimal(18,4)
-- **Linguagem**: TypeScript (strict mode)
+| Camada | Tecnologia |
+|---|---|
+| Back-end | Node.js 18 + Express + Prisma 6 |
+| Front-end | Next.js 14 (App Router) + Tailwind CSS |
+| Banco de Dados | PostgreSQL 14 + `DECIMAL(18,4)` |
+| Linguagem | TypeScript strict |
+| Auth | JWT HMAC-SHA256 customizado (sem dependência externa) |
+| Multi-tenancy | Master DB + banco separado por tenant |
 
-## Funcionalidades Principais
+---
 
-### Modelagem Append-Only + Snapshot
-- Tabelas principais: User, Client, Supplier, Vault, PurchaseOrder, SalesOrder, PaymentSplit, DailyRate, VaultLedger
-- Padrao append-only: ordens canceladas recebem `status = 'CANCELED'` (sem hard delete)
-- Snapshot de taxa/preco travado em cada ordem
-- Todos os valores em `Decimal(18,4)` (PostgreSQL)
+## Arquitetura Multi-Tenant
 
-### Backend com transacoes ACID
-- Compra usando fornecedor e venda usando cliente
-- Cadastro flexivel: cliente/fornecedor podem ser salvos apenas com nome
-- Modo avulso com controle de compliance por threshold
-- Split payment multimoeda com validacao exata
-- Atualizacao transacional do Vault com isolamento `Serializable`
-- Custo medio de aquisicao para calculo de lucro na venda
+Cada loja (tenant) tem seu próprio banco de dados PostgreSQL isolado.
+Um banco master armazena metadados dos tenants (ID, `databaseUrl`, status de licença).
 
-### Frontend
+```
+┌─────────────────────────────────────┐
+│        compra_ouro_master           │
+│   Tenant { id, companyName,         │
+│            databaseUrl, license }   │
+└──────────────┬──────────────────────┘
+               │ resolve databaseUrl
+       ┌───────┴────────┐
+       ▼                ▼
+ tenant_loja_a_…   tenant_loja_b_…
+   (schema completo)  (schema completo)
+```
 
-1. Dashboard: saldo do cofre, ouro em aberto e formulario de taxa diaria
-2. Compra POS: contraparte fornecedor com modo avulso, preco negociado e split dinamico
-3. Venda: contraparte cliente com modo avulso, preco negociado e split dinamico
-4. Extrato (Ledger): timeline cronologica com custo/receita/lucro
-5. Cadastro de Clientes: cadastro flexivel (somente nome obrigatorio)
-6. Cadastro de Fornecedores: cadastro flexivel (somente nome da empresa obrigatorio)
-7. TradePartySelector: autocomplete reutilizavel com recentes + ordenacao A-Z
+Cada requisição de dados carrega o `X-Tenant-ID` no header.
+O middleware resolve o banco correto e injeta um `PrismaClient` isolado via `AsyncLocalStorage`.
 
-## Quick Start
+---
 
-### Pre-requisitos
+## Autenticação
+
+- Login via `POST /api/auth/login` (email + senha, header `X-Tenant-ID`)
+- Resposta inclui `accessToken` (JWT HS256) com claims: `tenantId`, `userId`, `role`, `exp`
+- Rotas de dados exigem `Authorization: Bearer <token>`
+- O `userId` do token é usado automaticamente como `createdById` em compras e vendas — sem campo manual
+
+---
+
+## Quick Start (Desenvolvimento)
+
+### Pré-requisitos
 - Node.js 18+
 - PostgreSQL 14+
 
-### Instalacao
+### Instalação
 
 ```bash
-# Instalar dependências backend
+# Dependências backend
 npm install
 
-# Instalar dependências frontend
+# Dependências frontend
 npm --prefix web install
 
-# Configurar banco de dados
+# Variáveis de ambiente
 cp .env.example .env
-# Editar .env com DATABASE_URL do PostgreSQL
+# Editar DATABASE_URL, MASTER_DATABASE_URL, POSTGRES_ADMIN_URL e JWT_SECRET
+```
 
-# Gerar Prisma Client
+### Configuração dos bancos
+
+```bash
+# Gerar Prisma Clients (tenant schema + master schema)
 npm run prisma:generate
+npm run prisma:generate:master
 
-# Aplicar migrations pendentes
+# Aplicar migrations no banco raiz
 npx prisma migrate deploy
+```
+
+### Provisionar o primeiro tenant
+
+```bash
+npm run provision:tenant -- "Nome da Loja" "Admin Nome" "admin@loja.com" "SenhaSegura123"
+```
+
+O script cria o banco do tenant, aplica todas as migrations e gera o usuário admin.
+
+### Seed de dados operacionais (vault + taxa do dia)
+
+```bash
+npx tsx src/scripts/seed-tenant-runtime-data.ts \
+  "postgresql://postgres:postgres@localhost:5432/tenant_nome_loja_…?schema=public" \
+  "admin@loja.com"
 ```
 
 ### Executar
 
 ```bash
-# Terminal 1: Backend (porta 3002)
-set PORT=3002 && npm run dev
-
-# PowerShell equivalente
-$env:PORT=3002; npm run dev
-
-# Terminal 2: Frontend (porta 3003)
-npm --prefix web exec -- next dev --port 3003
-
-# Opcional por variavel (script padrao usa 3001)
-$env:PORT=3003; npm --prefix web run dev
-```
-
-Acesse: **http://localhost:3003/dashboard**
-
-## CORS em dev
-
-Por padrao, o backend permite origem:
-
-```bash
-http://localhost:3003
-```
-
-Pode ser alterado por variavel:
-
-```bash
-set CORS_ORIGIN=http://localhost:3003
+# Terminal 1 — Backend (padrão porta 3000)
 npm run dev
+
+# Terminal 2 — Frontend
+npm --prefix web exec -- next dev --port 3004
 ```
 
-## Estrutura
+Acesse: **http://localhost:3004/login**
+
+---
+
+## Variáveis de Ambiente
+
+| Variável | Descrição |
+|---|---|
+| `DATABASE_URL` | Banco raiz (Prisma migrations) |
+| `MASTER_DATABASE_URL` | Banco master com metadados de tenants |
+| `POSTGRES_ADMIN_URL` | Banco admin para criar novos bancos de tenant |
+| `JWT_SECRET` | Segredo HMAC-SHA256 para assinar tokens |
+| `MASTER_API_KEY` | Chave para o endpoint de provisionamento |
+| `PORT` | Porta do backend (padrão: 3000) |
+| `CORS_ORIGIN` | Origem permitida pelo CORS |
+
+---
+
+## Estrutura do Projeto
 
 ```
 compra-de-ouro/
 ├── src/
-│   ├── server.ts              # Express server
-│   ├── prisma.ts              # Prisma client
+│   ├── server.ts                      # Express + middlewares
+│   ├── prisma.ts                      # Proxy Prisma (tenant-aware)
 │   ├── lib/
-│   │   ├── decimal.ts         # Utilitários Decimal
-│   │   └── errors.ts          # Classes de erro
+│   │   ├── jwt.ts                     # Sign / verify JWT HMAC-SHA256
+│   │   ├── password.ts                # Verificação de senha
+│   │   ├── decimal.ts                 # Utilitários Decimal.js
+│   │   └── errors.ts                  # DomainError
+│   ├── middleware/
+│   │   ├── auth-middleware.ts         # Valida Bearer token → req.userId
+│   │   └── tenant-resolver.ts        # X-Tenant-ID → req.tenantPrisma
+│   ├── tenant/
+│   │   ├── master-client.ts           # Lê/escreve metadados no master DB
+│   │   ├── provisioning.ts            # Cria banco + migrations + admin
+│   │   ├── tenant-context.ts          # AsyncLocalStorage do tenant
+│   │   └── tenant-prisma-factory.ts  # Pool de PrismaClients por tenant
 │   ├── services/
 │   │   ├── purchase-order-service.ts
-│   │   ├── sales-order-service.ts
-│   │   └── order-service.ts
-│   └── routes/
-│       ├── orders.ts          # POST /api/orders/purchase, /sale
-│       ├── rates.ts           # POST /api/rates, GET /latest
-│       ├── vault.ts           # GET /api/vault
-│       ├── clients.ts         # CRUD clientes
-│       ├── suppliers.ts       # CRUD fornecedores
-│       └── ledger.ts          # GET /api/ledger
+│   │   └── sales-order-service.ts
+│   ├── routes/
+│   │   ├── auth.ts                    # POST /api/auth/login
+│   │   ├── master-admin.ts            # POST /api/master/provision
+│   │   ├── orders.ts                  # Compra e venda
+│   │   ├── rates.ts                   # Taxa diária
+│   │   ├── vault.ts                   # Saldo do cofre
+│   │   ├── clients.ts
+│   │   ├── suppliers.ts
+│   │   ├── ledger.ts
+│   │   ├── treasury.ts                # Dashboard gerencial completo
+│   │   ├── gold-transit.ts            # Ouro em trânsito
+│   │   ├── loan-books.ts              # Adiantamentos a garimpeiros
+│   │   └── opex.ts                    # Despesas operacionais
+│   └── scripts/
+│       ├── provision-new-tenant.ts
+│       ├── seed-tenant-runtime-data.ts
+│       ├── seed-market-rates.ts
+│       ├── inspect-tenant-columns.ts
+│       └── validate-migration.ts
 ├── prisma/
-│   └── schema.prisma          # Schema Decimal-only
+│   ├── schema.prisma                  # Schema principal (tenant)
+│   ├── master_schema.prisma           # Schema do master DB
+│   └── migrations/
 ├── web/
 │   ├── app/
-│   │   ├── dashboard/page.tsx
-│   │   ├── compra/page.tsx
-│   │   ├── venda/page.tsx
-│   │   ├── extrato/page.tsx
-│   │   ├── clientes/page.tsx
-│   │   ├── fornecedores/page.tsx
-│   │   └── globals.css
+│   │   ├── login/
+│   │   ├── dashboard/
+│   │   ├── compra/
+│   │   ├── venda/
+│   │   ├── extrato/
+│   │   ├── tesouraria/
+│   │   ├── clientes/
+│   │   └── fornecedores/
 │   ├── components/
-│   │   ├── TradePartySelector.tsx
+│   │   ├── LoginPage.tsx
+│   │   ├── ProtectedRoute.tsx
 │   │   ├── PurchasePage.tsx
 │   │   ├── SalesPage.tsx
-│   │   ├── ClientsPage.tsx
-│   │   ├── SuppliersPage.tsx
-│   │   ├── TreasurySplitPlanner.tsx
-│   │   ├── PriceSuggestionBreakdown.tsx
-│   │   └── ui.tsx
+│   │   ├── TreasuryDashboard.tsx
+│   │   ├── DashboardClient.tsx
+│   │   ├── TradePartySelector.tsx
+│   │   └── …
 │   └── lib/
-│       ├── decimal.ts
-│       ├── api.ts
-│       ├── treasury.ts
-│       └── complianceConfig.ts
+│       ├── auth-store.ts              # Estado de sessão (localStorage)
+│       ├── apiClient.ts               # fetch com Bearer + X-Tenant-ID
+│       └── decimal.ts
 └── .env.example
 ```
 
-## Regra Absoluta: Decimal, Nunca Float
-
-Todos os valores monetários, câmbio e peso em:
-- PostgreSQL: `DECIMAL(18,4)`
-- Node: `decimal.js` e `Prisma.Decimal`
-- React: `decimal.js` com formatação `toFixed(4)`
+---
 
 ## API Endpoints
 
+Todas as rotas de dados exigem `Authorization: Bearer <token>` e `X-Tenant-ID`.
+
+### Auth
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/auth/login` | Login → accessToken |
+
 ### Ordens
-- `POST /api/orders/purchase` - Criar compra (contraparte: fornecedor)
-- `POST /api/orders/sale` - Criar venda (contraparte: cliente)
-- `POST /api/orders/purchase/:id/cancel` - Cancelar compra
-- `POST /api/orders/sale/:id/cancel` - Cancelar venda
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/orders/purchase` | Criar compra |
+| POST | `/api/orders/sale` | Criar venda |
+| POST | `/api/orders/purchase/:id/cancel` | Cancelar compra |
+| POST | `/api/orders/sale/:id/cancel` | Cancelar venda |
 
-### Taxas
-- `POST /api/rates` - Criar taxa diária
-- `GET /api/rates/latest` - Taxa mais recente
+### Taxas / Cofre / Extrato
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/rates` | Inserir taxa do dia |
+| GET | `/api/rates/latest` | Taxa mais recente |
+| GET | `/api/vault` | Saldo consolidado |
+| GET | `/api/ledger` | Timeline de movimentos |
 
-### Cofre
-- `GET /api/vault` - Saldo consolidado
+### CRM
+| Método | Rota | Descrição |
+|---|---|---|
+| GET/POST | `/api/clients` | Clientes |
+| GET/POST | `/api/suppliers` | Fornecedores |
 
-### CRM (Cadastro Flexivel)
-- `GET/POST /api/clients` - Clientes
-- `GET/POST /api/suppliers` - Fornecedores
+### Gerencial
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/treasury` | P&L, cofre MTM, fluxo cambial, adiantamentos, OPEX |
+| GET/POST | `/api/gold-transit` | Ouro em trânsito |
+| GET/POST | `/api/loan-books` | Adiantamentos a garimpeiros |
+| GET/POST | `/api/opex` | Despesas operacionais |
 
-### Extrato
-- `GET /api/ledger` - Timeline de transações
+### Admin Master (requer `X-Master-Key`)
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/master/provision` | Provisionar novo tenant |
 
-## Desenvolvimento
+---
 
-### Compilar TypeScript
-```bash
-npm run build
-npm --prefix web run build
-```
+## Payload de Compra
 
-### Iniciar em producao
-```bash
-npm start
-npm --prefix web run start
-```
-
-### Estrutura de splits em ordem
 ```json
 {
+  "isWalkIn": true,
+  "goldState": "BURNED",
+  "physicalWeight": "10.0000",
+  "purityPercentage": "99.0000",
+  "negotiatedPricePerGram": "62.0000",
+  "totalOrderValueUsd": "620.0000",
   "paymentSplits": [
-    { "currency": "USD", "amount": "300.0000" },
-    { "currency": "EUR", "amount": "150.0000" },
-    { "currency": "SRD", "amount": "1200.0000" }
+    { "currency": "USD", "amount": "620.0000" }
   ]
 }
 ```
 
-## Exemplo: Fluxo de Compra
+`createdById` é preenchido automaticamente pelo backend a partir do JWT — não deve ser enviado no payload.
 
-1. Admin insere taxa do dia (ouro por grama USD, USD->SRD, EUR->USD)
-2. Operador seleciona fornecedor (ou marca avulso)
-3. Informa peso fisico, pureza e preco negociado por grama
-4. Sistema calcula total em USD e permite ajuste fino controlado
-5. Operador distribui pagamento em split (USD/EUR/SRD)
-6. Finalizacao exige split fechando exatamente o total
-7. Ordem finalizada e cofre atualizado atomicamente
+---
 
-## Exemplo: Fluxo de Venda com Lucro
+## Regra Absoluta: Decimal, Nunca Float
 
-1. Operador seleciona cliente (ou marca avulso)
-2. Informa peso fisico, pureza e valor negociado em USD
-3. Operador distribui recebimento em split (USD/EUR/SRD)
-4. Sistema calcula custo médio do ouro em aberto
-5. Calcula lucro em USD e projecao em SRD
-6. Ordem finalizada, ouro saído do cofre
+| Camada | Tipo |
+|---|---|
+| PostgreSQL | `DECIMAL(18,4)` |
+| Node.js | `Prisma.Decimal` / `decimal.js` |
+| Frontend | `decimal.js` com `toFixed(4)` |
 
-## Notas Importantes
+---
 
-- Sem integração externa de preço; admin insere manualmente
-- Cada ordem leva snapshot de taxa/preço daquele momento
-- Cancelamento é estorno contábil, não deletar do banco
-- Ouro em aberto usa media ponderada de custo para apuracao de resultado
+## Scripts NPM
 
-## Contribuindo
+```bash
+npm run dev                     # Backend em modo watch
+npm run build                   # Compilar TypeScript
+npm run prisma:generate         # Gerar Prisma Client (tenant)
+npm run prisma:generate:master  # Gerar Prisma Client (master)
+npm run validate:migration      # Verificar integridade do schema
+npm run provision:tenant        # Provisionar novo tenant (args: nome admin email senha)
+```
 
-Fork, crie branch feature e submeta PR.
+---
 
-## Licenca
+## Licença
 
-Proprietário - Casa de Compra e Venda de Ouro, Suriname
+Proprietário — Casa de Compra e Venda de Ouro, Suriname

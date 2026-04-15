@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE "DailyRate" DROP COLUMN IF EXISTS "eurToBaseRate";
+ALTER TABLE "PurchaseOrder" DROP COLUMN IF EXISTS "lockedEurToBaseRate";
+ALTER TABLE "SalesOrder" DROP COLUMN IF EXISTS "lockedEurToBaseRate";
+
+COMMIT;

@@ -1,6 +1,7 @@
 import { OrderStatus } from "@prisma/client";
 import { Router } from "express";
 
+import { D, q4 } from "../lib/decimal.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
@@ -17,8 +18,8 @@ router.get("/", async (_req, res) => {
     kind: "PURCHASE",
     status: order.status,
     physicalWeight: order.physicalWeight,
-    costSrd: (Number(order.acquisitionCostUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
-    costUsd: Number(order.acquisitionCostUsd || 0).toFixed(4),
+    costSrd: q4(D(order.acquisitionCostUsd ?? 0).mul(D(order.lockedUsdToSrdRate ?? 0))).toFixed(4),
+    costUsd: q4(order.acquisitionCostUsd ?? 0).toFixed(4),
     revenueSrd: "0.0000",
     revenueUsd: "0.0000",
     profitSrd: "0.0000",
@@ -31,18 +32,18 @@ router.get("/", async (_req, res) => {
     kind: "SALE",
     status: order.status,
     physicalWeight: order.physicalWeight,
-    costSrd: (Number(order.averageAcquisitionCostUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
-    costUsd: Number(order.averageAcquisitionCostUsd || 0).toFixed(4),
-    revenueSrd: (Number(order.negotiatedTotalUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
-    revenueUsd: Number(order.negotiatedTotalUsd || 0).toFixed(4),
+    costSrd: q4(D(order.averageAcquisitionCostUsd ?? 0).mul(D(order.lockedUsdToSrdRate ?? 0))).toFixed(4),
+    costUsd: q4(order.averageAcquisitionCostUsd ?? 0).toFixed(4),
+    revenueSrd: q4(D(order.negotiatedTotalUsd ?? 0).mul(D(order.lockedUsdToSrdRate ?? 0))).toFixed(4),
+    revenueUsd: q4(order.negotiatedTotalUsd ?? 0).toFixed(4),
     profitSrd:
       order.status === OrderStatus.CANCELED
         ? "0.0000"
-        : (Number(order.realizedProfitUsd || 0) * Number(order.lockedUsdToSrdRate || 0)).toFixed(4),
+        : q4(D(order.realizedProfitUsd ?? 0).mul(D(order.lockedUsdToSrdRate ?? 0))).toFixed(4),
     profitUsd:
       order.status === OrderStatus.CANCELED
         ? "0.0000"
-        : Number(order.realizedProfitUsd || 0).toFixed(4)
+        : q4(order.realizedProfitUsd ?? 0).toFixed(4)
   }));
 
   const timeline = [...purchaseRows, ...saleRows].sort(

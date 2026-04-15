@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { PrismaClient } from "@prisma/client";
+import { D } from "../lib/decimal.js";
 
 const prisma = new PrismaClient();
 
@@ -81,8 +82,6 @@ const pickColumn = (columns: Set<string>, options: string[]): string | null => {
 
   return null;
 };
-
-const toNumber = (value: string) => Number(value);
 
 async function run() {
   console.log("\n=== MIGRATION SANITY CHECK REPORT ===");
@@ -316,7 +315,7 @@ async function run() {
   `;
   const vaultLedgerRows = await prisma.$queryRawUnsafe<VaultLedgerRow[]>(vaultSql);
 
-  const vaultFail = vaultLedgerRows.some((row) => toNumber(row.absDiff) > toNumber(DECIMAL_TOLERANCE));
+  const vaultFail = vaultLedgerRows.some((row) => D(row.absDiff).gt(D(DECIMAL_TOLERANCE)));
 
   console.log("\n[CHECK 4] VaultLedger Reconciliation (ledger net vs current Vault.balanceGoldGrams)");
   if (vaultLedgerRows.length === 0) {

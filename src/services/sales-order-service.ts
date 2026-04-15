@@ -10,10 +10,11 @@ type DecimalInstance = ReturnType<typeof D>;
 export type SalesPaymentSplitInput = {
   currency: Currency;
   amount: string;
+  manualExchangeRate?: string;
 };
 
 export type CreateSalesOrderInput = {
-  clientId?: string;
+  supplierId?: string;
   isWalkIn?: boolean;
   createdById: string;
   dailyRateId?: string;
@@ -72,13 +73,6 @@ const getLockedRate = async (tx: DbClient, dailyRateId?: string) => {
     orderBy: [{ rateDate: "desc" }, { createdAt: "desc" }]
   });
 
-  if (!latest) {
-    throw new DomainError("No DailyRate configured. Create one before orders.", 422, {
-      code: "RATE_REQUIRED",
-      fieldErrors: { dailyRateId: "No DailyRate configured. Create one before orders." }
-    });
-  }
-
   return latest;
 };
 
@@ -103,26 +97,43 @@ const getOrCreateMainVault = async (tx: DbClient) => {
 
 const convertSplitToUsd = (
   split: SalesPaymentSplitInput,
-  snapshot: LockedRateSnapshot
+  snapshot: LockedRateSnapshot | null
 ): DecimalInstance => {
   const amount = q4(split.amount) as DecimalInstance;
+  const manualRate = split.manualExchangeRate ? (q4(split.manualExchangeRate) as DecimalInstance) : null;
 
   if (split.currency === Currency.USD) {
     return amount;
   }
 
   if (split.currency === Currency.SRD) {
-    if (snapshot.usdToSrdRate.lte(0)) {
-      throw new DomainError("Invalid USD/SRD rate snapshot.", 422);
+    if (manualRate && manualRate.gt(0)) {
+      return q4(amount.div(manualRate)) as DecimalInstance;
     }
-    return q4(amount.div(snapshot.usdToSrdRate)) as DecimalInstance;
+
+    if (snapshot && snapshot.usdToSrdRate.gt(0)) {
+      return q4(amount.div(snapshot.usdToSrdRate)) as DecimalInstance;
+    }
+
+    throw new DomainError("Manual exchange rate is required for SRD split when no daily rate is available.", 422, {
+      code: "VALIDATION_ERROR",
+      fieldErrors: { paymentSplits: "Informe taxa manual USD/SRD para linhas em SRD." }
+    });
   }
 
   if (split.currency === Currency.EUR) {
-    if (snapshot.eurToUsdRate.lte(0)) {
-      throw new DomainError("Invalid EUR/USD rate snapshot.", 422);
+    if (manualRate && manualRate.gt(0)) {
+      return q4(amount.mul(manualRate)) as DecimalInstance;
     }
-    return q4(amount.mul(snapshot.eurToUsdRate)) as DecimalInstance;
+
+    if (snapshot && snapshot.eurToUsdRate.gt(0)) {
+      return q4(amount.mul(snapshot.eurToUsdRate)) as DecimalInstance;
+    }
+
+    throw new DomainError("Manual exchange rate is required for EUR split when no daily rate is available.", 422, {
+      code: "VALIDATION_ERROR",
+      fieldErrors: { paymentSplits: "Informe taxa manual EUR/USD para linhas em EUR." }
+    });
   }
 
   throw new DomainError("Unsupported split currency.", 422, {
@@ -152,24 +163,24 @@ export class SalesOrderService {
         const vault = await getOrCreateMainVault(tx);
         const isWalkIn = Boolean(input.isWalkIn);
 
-        const [client, operator] = await Promise.all([
-          isWalkIn || !input.clientId
+        const [supplier, operator] = await Promise.all([
+          isWalkIn || !input.supplierId
             ? Promise.resolve(null)
-            : tx.client.findUnique({ where: { id: input.clientId } }),
+            : tx.supplier.findUnique({ where: { id: input.supplierId } }),
           tx.user.findUnique({ where: { id: input.createdById } })
         ]);
 
-        if (!isWalkIn && !client) {
-          throw new DomainError("Cliente invalido.", 422, {
-            code: "CLIENT_NOT_FOUND",
-            fieldErrors: { clientId: "Cliente selecionado nao existe." }
+        if (!isWalkIn && !supplier) {
+          throw new DomainError("Fornecedor invalido.", 422, {
+            code: "SUPPLIER_NOT_FOUND",
+            fieldErrors: { supplierId: "Fornecedor selecionado nao existe." }
           });
         }
 
-        if (!isWalkIn && client && client.status !== RecordStatus.ACTIVE) {
-          throw new DomainError("Cliente bloqueado para operacoes.", 409, {
-            code: "CLIENT_BLOCKED",
-            fieldErrors: { clientId: "Cliente bloqueado para operacoes." }
+        if (!isWalkIn && supplier && supplier.status !== RecordStatus.ACTIVE) {
+          throw new DomainError("Fornecedor bloqueado para operacoes.", 409, {
+            code: "SUPPLIER_BLOCKED",
+            fieldErrors: { supplierId: "Fornecedor bloqueado para operacoes." }
           });
         }
 
@@ -180,11 +191,13 @@ export class SalesOrderService {
           });
         }
 
-        const snapshot: LockedRateSnapshot = {
-          goldPricePerGramUsd: prismaToDecimal(rate.goldPricePerGramUsd),
-          usdToSrdRate: prismaToDecimal(rate.usdToSrdRate),
-          eurToUsdRate: prismaToDecimal(rate.eurToUsdRate)
-        };
+        const snapshot: LockedRateSnapshot | null = rate
+          ? {
+              goldPricePerGramUsd: prismaToDecimal(rate.goldPricePerGramUsd),
+              usdToSrdRate: prismaToDecimal(rate.usdToSrdRate),
+              eurToUsdRate: prismaToDecimal(rate.eurToUsdRate)
+            }
+          : null;
 
         const physicalWeight = q4(input.physicalWeight) as DecimalInstance;
         const purityPercentage = q4(input.purityPercentage) as DecimalInstance;
@@ -245,9 +258,15 @@ export class SalesOrderService {
           return {
             currency: split.currency,
             amount,
+            manualExchangeRate: split.manualExchangeRate ? (q4(split.manualExchangeRate) as DecimalInstance) : null,
             convertedValueUsd: convertSplitToUsd(split, snapshot)
           };
         });
+
+        const lockedUsdToSrdRate =
+          snapshot?.usdToSrdRate ?? splitRows.find((split) => split.currency === Currency.SRD && split.manualExchangeRate)?.manualExchangeRate ?? (D("1") as DecimalInstance);
+        const lockedEurToUsdRate =
+          snapshot?.eurToUsdRate ?? splitRows.find((split) => split.currency === Currency.EUR && split.manualExchangeRate)?.manualExchangeRate ?? (D("1") as DecimalInstance);
 
         const totalSplitUsd = splitRows.reduce(
           (acc, split) => q4(acc.add(split.convertedValueUsd)) as DecimalInstance,
@@ -320,7 +339,7 @@ export class SalesOrderService {
         const order = await tx.salesOrder.create({
           data: {
             status: OrderStatus.FINALIZED,
-            clientId: isWalkIn ? null : input.clientId,
+            supplierId: isWalkIn ? null : input.supplierId,
             isWalkIn,
             complianceOverride,
             createdById: input.createdById,
@@ -329,8 +348,8 @@ export class SalesOrderService {
             purityPercentage: decimalToPrisma(purityPercentage),
             negotiatedTotalUsd: decimalToPrisma(negotiatedTotalUsd),
             lockedGoldPricePerGramUsd: decimalToPrisma(negotiatedPricePerGramUsd),
-            lockedUsdToSrdRate: decimalToPrisma(snapshot.usdToSrdRate),
-            lockedEurToUsdRate: decimalToPrisma(snapshot.eurToUsdRate),
+            lockedUsdToSrdRate: decimalToPrisma(lockedUsdToSrdRate),
+            lockedEurToUsdRate: decimalToPrisma(lockedEurToUsdRate),
             averageAcquisitionCostUsd: decimalToPrisma(averageAcquisitionCostUsd),
             realizedProfitUsd: decimalToPrisma(realizedProfitUsd)
           }
