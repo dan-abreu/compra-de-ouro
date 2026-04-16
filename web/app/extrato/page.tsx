@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Info } from "lucide-react";
 
 import { Card } from "@/components/ui";
 import { apiRequest } from "@/lib/api";
@@ -22,6 +23,24 @@ type Entry = {
   profitUsd?: string;
   profitSrd: string;
 };
+
+function HelpHint({ title, content }: { title: string; content: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-500"
+        aria-label={`Ajuda: ${title}`}
+        title={title}
+      >
+        <Info size={11} />
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-stone-200 bg-white p-3 text-[11px] leading-relaxed text-stone-600 shadow-xl group-hover:block group-focus-within:block">
+        <strong className="mb-1 block text-xs text-stone-800">{title}</strong>
+        {content}
+      </span>
+    </span>
+  );
+}
 
 export default function ExtratoPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -54,6 +73,13 @@ export default function ExtratoPage() {
 
   return (
     <Card title="Extrato (Ledger Statement)">
+      <div className="mb-3 flex items-center gap-2 text-xs text-stone-600">
+        <span>Historico oficial das ordens registradas e seus efeitos financeiros.</span>
+        <HelpHint
+          title="Extrato"
+          content="Lista compras e vendas por data, com impacto em peso, custo, receita e lucro para auditoria operacional."
+        />
+      </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
@@ -68,7 +94,15 @@ export default function ExtratoPage() {
               <th className="px-2 py-2">SRD</th>
               <th className="px-2 py-2">Custo</th>
               <th className="px-2 py-2">Lucro</th>
-              <th className="px-2 py-2">Acoes</th>
+              <th className="px-2 py-2">
+                <span className="inline-flex items-center gap-1">
+                  Acoes
+                  <HelpHint
+                    title="Acoes"
+                    content="Permite cancelar a ordem no extrato. Ao cancelar, o status muda para CANCELED e o lucro e zerado na visualizacao."
+                  />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>

@@ -8,7 +8,7 @@ import {
   Banknote,
   CreditCard,
   Gem,
-  Package,
+  Info,
   Scale,
   TrendingDown,
   TrendingUp
@@ -65,14 +65,6 @@ type TreasuryResponse = {
     status: "OPEN" | "SETTLED" | "CANCELED";
     updatedAt: string;
   }>;
-  goldTransit: Array<{
-    id: string;
-    destination: string;
-    physicalWeight: string;
-    dispatchDate: string;
-    expectedSettlementDate: string;
-    status: "IN_TRANSIT" | "SETTLED" | "CANCELED";
-  }>;
   opexToday: Array<{
     id: string;
     category: string;
@@ -92,27 +84,73 @@ const fmtUsd = (value: Decimal.Value, digits = 2) => `$ ${D(value).toFixed(digit
 const fmtGold = (value: Decimal.Value) => `${D(value).toFixed(4)} g`;
 const signPrefix = (value: Decimal.Value) => (D(value).gte(0) ? "+" : "");
 
-function SectionHeading({ icon: Icon, title, subtitle }: { icon: LucideIcon; title: string; subtitle?: string }) {
+function HelpBalloon({ title, content }: { title: string; content: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-500"
+        aria-label={`Ajuda: ${title}`}
+        title={title}
+      >
+        <Info size={12} />
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-stone-200 bg-white p-3 text-[11px] leading-relaxed text-stone-600 shadow-xl group-hover:block group-focus-within:block">
+        <strong className="mb-1 block text-xs text-stone-800">{title}</strong>
+        {content}
+      </span>
+    </span>
+  );
+}
+
+function SectionHeading({
+  icon: Icon,
+  title,
+  subtitle,
+  helpText
+}: {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+  helpText?: string;
+}) {
   return (
     <div className="mb-4 flex items-start gap-3">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-stone-100 text-stone-500">
         <Icon size={16} />
       </div>
       <div>
-        <h2 className="font-heading text-sm font-semibold uppercase tracking-widest text-stone-700">{title}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-heading text-sm font-semibold uppercase tracking-widest text-stone-700">{title}</h2>
+          {helpText ? <HelpBalloon title={title} content={helpText} /> : null}
+        </div>
         {subtitle ? <p className="mt-0.5 text-xs text-stone-400">{subtitle}</p> : null}
       </div>
     </div>
   );
 }
 
-function KpiCard({ label, value, sub, trend }: { label: string; value: string; sub?: string; trend?: "up" | "down" | "neutral" }) {
+function KpiCard({
+  label,
+  value,
+  sub,
+  trend,
+  helpText
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  trend?: "up" | "down" | "neutral";
+  helpText?: string;
+}) {
   const trendClass = trend === "up" ? "text-emerald-600" : trend === "down" ? "text-red-500" : "text-stone-400";
   const TrendIcon = trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : null;
 
   return (
     <div className="glass rounded-2xl p-4 shadow-glow">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">{label}</p>
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">{label}</p>
+        {helpText ? <HelpBalloon title={label} content={helpText} /> : null}
+      </div>
       <p className="font-heading text-2xl font-bold leading-none tracking-tight text-stone-900">{value}</p>
       {sub ? (
         <div className={`mt-1 flex items-center gap-1 text-xs font-semibold ${trendClass}`}>
@@ -199,10 +237,6 @@ export function TreasuryDashboard() {
   const totalMtmValueUsd = useMemo(() => totalVaultGrams.mul(spotGramUsd), [totalVaultGrams, spotGramUsd]);
   const vaultUnrealizedPnl = useMemo(() => totalMtmValueUsd.minus(totalBookValueUsd), [totalMtmValueUsd, totalBookValueUsd]);
 
-  const transitRows = treasury?.goldTransit ?? [];
-  const totalTransitGrams = useMemo(() => transitRows.reduce((acc, row) => acc.plus(D(row.physicalWeight)), D(0)), [transitRows]);
-  const totalTransitMtm = useMemo(() => totalTransitGrams.mul(spotGramUsd), [totalTransitGrams, spotGramUsd]);
-
   const loanRows = treasury?.loanBooks ?? [];
   const totalDebtFromGarimpeiros = useMemo(
     () => loanRows.filter((row) => D(row.runningBalanceUsd).lt(0)).reduce((acc, row) => acc.plus(D(row.runningBalanceUsd).abs()), D(0)),
@@ -266,14 +300,43 @@ export function TreasuryDashboard() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <KpiCard label="Caixa Total (USD Eq.)" value={fmtUsd(totalCashUsdEq, 2)} sub="Saldos reais convertidos" trend="neutral" />
-        <KpiCard label="Cofre MTM (USD)" value={fmtUsd(totalMtmValueUsd, 2)} sub={`${totalVaultGrams.toFixed(4)} g x ${fmtUsd(spotGramUsd, 4)}`} trend="up" />
-        <KpiCard label="Lucro Liquido do Dia" value={fmtUsd(netPnl, 2)} sub={netPnl.gte(0) ? "Positivo" : "Negativo"} trend={netPnl.gte(0) ? "up" : "down"} />
-        <KpiCard label="Adiantamentos Abertos" value={fmtUsd(totalDebtFromGarimpeiros, 2)} sub={`${totalGoldOwed.toFixed(4)} g de ouro devido`} trend="down" />
+        <KpiCard
+          label="Caixa Total (USD Eq.)"
+          value={fmtUsd(totalCashUsdEq, 2)}
+          sub="Saldos reais convertidos"
+          trend="neutral"
+          helpText="Mostra todo o caixa somado em uma unica base (USD), convertendo EUR e SRD pela taxa atual."
+        />
+        <KpiCard
+          label="Cofre MTM (USD)"
+          value={fmtUsd(totalMtmValueUsd, 2)}
+          sub={`${totalVaultGrams.toFixed(4)} g x ${fmtUsd(spotGramUsd, 4)}`}
+          trend="up"
+          helpText="MTM (Mark-to-Market): valor do ouro do cofre no preco de mercado de agora."
+        />
+        <KpiCard
+          label="Lucro Liquido do Dia"
+          value={fmtUsd(netPnl, 2)}
+          sub={netPnl.gte(0) ? "Positivo" : "Negativo"}
+          trend={netPnl.gte(0) ? "up" : "down"}
+          helpText="Resultado diario apos subtrair despesas operacionais (OPEX) do lucro de trading."
+        />
+        <KpiCard
+          label="Adiantamentos Abertos"
+          value={fmtUsd(totalDebtFromGarimpeiros, 2)}
+          sub={`${totalGoldOwed.toFixed(4)} g de ouro devido`}
+          trend="down"
+          helpText="Total que ainda precisa retornar para a loja via dinheiro e/ou ouro em aberto."
+        />
       </div>
 
       <section>
-        <SectionHeading icon={Banknote} title="Caixa e Tesouraria Multimoeda" subtitle="Saldos reais e fluxo cambial por moeda" />
+        <SectionHeading
+          icon={Banknote}
+          title="Caixa e Tesouraria Multimoeda"
+          subtitle="Saldos reais e fluxo cambial por moeda"
+          helpText="Explica o caixa separado por moeda e a exposicao cambial liquida (quanto entrou menos quanto saiu)."
+        />
 
         <div className="grid gap-4 md:grid-cols-3">
           {fxRows.map((row) => {
@@ -323,7 +386,12 @@ export function TreasuryDashboard() {
       </section>
 
       <section>
-        <SectionHeading icon={Gem} title="Cofre de Ouro - Inventario Fisico & MTM" subtitle={`Spot atual: ${fmtUsd(spotGramUsd, 4)} / g`} />
+        <SectionHeading
+          icon={Gem}
+          title="Cofre de Ouro - Inventario Fisico & MTM"
+          subtitle={`Spot atual: ${fmtUsd(spotGramUsd, 4)} / g`}
+          helpText="Mostra peso fisico, custo contabil e valor de mercado do ouro para enxergar ganho/perda latente."
+        />
 
         <div className="grid gap-4 md:grid-cols-3">
           <div className="glass rounded-2xl p-5 shadow-glow md:col-span-2">
@@ -383,50 +451,17 @@ export function TreasuryDashboard() {
               <p className="mb-1 text-[9px] uppercase tracking-wider text-stone-500">P&L Nao Realizado</p>
               <p className={`text-sm font-bold ${vaultUnrealizedPnl.gte(0) ? "text-emerald-700" : "text-red-600"}`}>{signPrefix(vaultUnrealizedPnl)}{fmtUsd(vaultUnrealizedPnl, 2)}</p>
             </div>
-            <div className="rounded-xl bg-sky-50 p-3 ring-1 ring-sky-200">
-              <div className="mb-1 flex items-center gap-1.5">
-                <Package size={11} className="text-sky-600" />
-                <p className="text-[9px] font-semibold uppercase tracking-wider text-sky-600">Em Transito</p>
-              </div>
-              <p className="font-bold text-sky-800">{totalTransitGrams.toFixed(4)} g</p>
-              <p className="text-xs text-sky-600">MTM {fmtUsd(totalTransitMtm, 2)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="glass mt-4 rounded-2xl p-5 shadow-glow">
-          <div className="mb-3 flex items-center gap-2">
-            <Package size={14} className="text-sky-500" />
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">Ouro em Transito - Aguardando Liquidacao</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <GridHeader cols={["Ref.", "Destino", "Peso", "MTM (USD)", "Despacho", "Liquidacao Prevista", "Status"]} />
-              </thead>
-              <tbody>
-                {transitRows.map((row) => {
-                  const mtm = D(row.physicalWeight).mul(spotGramUsd);
-                  return (
-                    <tr key={row.id} className="border-b border-stone-100 last:border-0">
-                      <td className="py-2.5 pr-4 font-mono text-xs text-stone-500">{row.id}</td>
-                      <td className="py-2.5 pr-4 font-medium text-stone-800">{row.destination}</td>
-                      <td className="py-2.5 pr-4 font-mono text-stone-700">{fmtGold(row.physicalWeight)}</td>
-                      <td className="py-2.5 pr-4 font-semibold text-amber-700">{fmtUsd(mtm, 2)}</td>
-                      <td className="py-2.5 pr-4 text-xs text-stone-500">{row.dispatchDate}</td>
-                      <td className="py-2.5 pr-4 text-xs text-stone-500">{row.expectedSettlementDate}</td>
-                      <td className="py-2.5"><Chip label={row.status === "SETTLED" ? "Liquidado" : "Em Transito"} variant={row.status === "SETTLED" ? "green" : "sky"} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         </div>
       </section>
 
       <section>
-        <SectionHeading icon={CreditCard} title="Emprestimos e Adiantamentos a Garimpeiros" subtitle="Controle de creditos e front money em tempo real" />
+        <SectionHeading
+          icon={CreditCard}
+          title="Emprestimos e Adiantamentos a Garimpeiros"
+          subtitle="Controle de creditos e front money em tempo real"
+          helpText="Mostra quem deve para a loja, quem possui credito e quanto de ouro ainda falta receber."
+        />
 
         <div className="glass rounded-2xl p-5 shadow-glow">
           <div className="mb-5 grid grid-cols-3 gap-3">
@@ -478,7 +513,12 @@ export function TreasuryDashboard() {
       </section>
 
       <section>
-        <SectionHeading icon={Scale} title="Lucros e Perdas do Dia (P&L)" subtitle="Trading profit e OPEX com dados reais" />
+        <SectionHeading
+          icon={Scale}
+          title="Lucros e Perdas do Dia (P&L)"
+          subtitle="Trading profit e OPEX com dados reais"
+          helpText="Consolida o resultado do dia: lucro de operacao, despesas e lucro liquido final."
+        />
 
         <div className="grid gap-4 md:grid-cols-3">
           <div className="glass rounded-2xl p-5 shadow-glow md:col-span-2">

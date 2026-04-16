@@ -33,6 +33,9 @@ build/
 prisma/.env
 prisma/dev.db
 
+# Prisma generated clients
+src/generated/
+
 # Misc
 .cache/
 .vercel/

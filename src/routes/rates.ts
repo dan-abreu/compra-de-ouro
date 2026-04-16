@@ -366,11 +366,25 @@ router.get("/market-live", async (_req: Request, res: Response) => {
     });
 
     if (!latest) {
-      return res.status(503).json({
-        message: "Nao foi possivel obter cotacoes. Nenhuma taxa local disponivel.",
-        code: "MARKET_LIVE_UNAVAILABLE",
-        fieldErrors: {}
-      });
+      const emergencyPayload: MarketLiveResponse = {
+        rateDate: new Date().toISOString(),
+        goldPricePerGramUsd: "76.6500",
+        usdToSrdRate: "38.2000",
+        eurToUsdRate: "1.0831",
+        fetchedAt: new Date().toISOString(),
+        sourceMode: "manual-input",
+        sources: [
+          {
+            symbol: "ALL",
+            provider: "Contingencia local",
+            url: "N/A",
+            note: "Sem APIs externas e sem taxa local cadastrada. Valores de contingencia para manter operacao."
+          }
+        ]
+      };
+
+      // Responde 200 para o frontend seguir operacional, sinalizando contingencia no sourceMode.
+      return res.json(emergencyPayload);
     }
 
     const fallbackPayload: MarketLiveResponse = {

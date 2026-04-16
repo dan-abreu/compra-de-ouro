@@ -2,6 +2,7 @@
 
 import Decimal from "decimal.js";
 import { useEffect, useMemo, useState } from "react";
+import { Info } from "lucide-react";
 
 import { TradePartyOption, TradePartySelector } from "@/components/TradePartySelector";
 import { TreasurySplitPlanner } from "@/components/TreasurySplitPlanner";
@@ -30,7 +31,7 @@ type DailyRate = {
   usdToSrdRate: string;
   eurToUsdRate: string;
   fetchedAt?: string;
-  sourceMode?: "external-live" | "database-fallback";
+  sourceMode?: "external-live" | "database-cached" | "manual-input";
   sources?: Array<{
     symbol: string;
     provider: string;
@@ -38,6 +39,24 @@ type DailyRate = {
     note: string;
   }>;
 };
+
+function HelpHint({ title, content }: { title: string; content: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-500"
+        aria-label={`Ajuda: ${title}`}
+        title={title}
+      >
+        <Info size={11} />
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-stone-200 bg-white p-3 text-[11px] leading-relaxed text-stone-600 shadow-xl group-hover:block group-focus-within:block">
+        <strong className="mb-1 block text-xs text-stone-800">{title}</strong>
+        {content}
+      </span>
+    </span>
+  );
+}
 
 export function PurchasePage() {
   const auth = useAuthStore();
@@ -287,7 +306,13 @@ export function PurchasePage() {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className="xl:col-span-2">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">Contraparte da Compra</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">Contraparte da Compra</p>
+                      <HelpHint
+                        title="Contraparte da Compra"
+                        content="Selecione quem esta vendendo ouro para a loja. Se nao for cadastrado, ative Cliente Avulso."
+                      />
+                    </div>
                     <label className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800">
                       <input
                         type="checkbox"
@@ -301,6 +326,10 @@ export function PurchasePage() {
                         }}
                       />
                       Cliente Avulso
+                      <HelpHint
+                        title="Cliente Avulso"
+                        content="Use quando a pessoa nao tem cadastro. Dependendo do valor, pode exigir validacao de compliance."
+                      />
                     </label>
                   </div>
                   <TradePartySelector
@@ -322,7 +351,13 @@ export function PurchasePage() {
             </div>
 
             <div className="rounded-2xl border border-stone-300/70 bg-stone-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">Estado Fisico do Ouro</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-stone-600">Estado Fisico do Ouro</p>
+                <HelpHint
+                  title="Estado Fisico do Ouro"
+                  content="Classifica o tipo de material recebido na compra, para controle de estoque e apuracao financeira."
+                />
+              </div>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="flex items-center gap-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800">
                   <input type="radio" name="goldStatePurchase" checked={goldState === "BURNED"} onChange={() => setGoldState("BURNED")} />
@@ -337,17 +372,35 @@ export function PurchasePage() {
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <label className="text-xs font-medium text-stone-700">
-                {goldState === "BURNED" ? "Peso do Ouro Queimado (g)" : "Peso do Ouro Fundido (g)"}
+                <span className="mb-1 flex items-center gap-2">
+                  <span>{goldState === "BURNED" ? "Peso do Ouro Queimado (g)" : "Peso do Ouro Fundido (g)"}</span>
+                  <HelpHint
+                    title="Peso do Ouro"
+                    content="Peso fisico medido da peca. Esse valor, junto com preco por grama, define o total da ordem."
+                  />
+                </span>
                 <input value={form.physicalWeight} onChange={(event) => setForm({ ...form, physicalWeight: event.target.value })} required />
                 {fieldError("physicalWeight") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("physicalWeight")}</p> : null}
               </label>
               <label className="text-xs font-medium text-stone-700">
-                Teor de Pureza (%)
+                <span className="mb-1 flex items-center gap-2">
+                  <span>Teor de Pureza (%)</span>
+                  <HelpHint
+                    title="Teor de Pureza"
+                    content="Percentual de pureza informado na negociacao. Mantem historico tecnico e auditoria da compra."
+                  />
+                </span>
                 <input value={form.purityPercentage} onChange={(event) => setForm({ ...form, purityPercentage: event.target.value })} required />
                 {fieldError("purityPercentage") ? <p className="mt-1 text-xs font-semibold text-red-700">{fieldError("purityPercentage")}</p> : null}
               </label>
               <label className="text-xs font-medium text-stone-700">
-                Preço da Grama da Ordem (USD)
+                <span className="mb-1 flex items-center gap-2">
+                  <span>Preco da Grama da Ordem (USD)</span>
+                  <HelpHint
+                    title="Preco da Grama"
+                    content="Preco negociado desta operacao. Pode seguir o spot do mercado ou um valor ajustado na negociacao."
+                  />
+                </span>
                 <input
                   value={form.negotiatedPricePerGramUsd}
                   onChange={(event) => setForm({ ...form, negotiatedPricePerGramUsd: event.target.value })}
@@ -376,6 +429,14 @@ export function PurchasePage() {
               </div>
             </div>
 
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-600">
+              <span>Rateio de Tesouraria</span>
+              <HelpHint
+                title="Rateio de Tesouraria"
+                content="Divida o valor total entre moedas e taxas. A compra so fecha quando a soma em USD bate exatamente o total da ordem."
+              />
+            </div>
+
             <TreasurySplitPlanner
               paymentLines={paymentLines}
               paymentPreview={paymentPreview}
@@ -397,16 +458,41 @@ export function PurchasePage() {
 
         <div className="space-y-4">
           <Card title="Snapshot de Mercado">
+            <div className="mb-3 flex items-center gap-2 text-xs text-stone-600">
+              <span>Referencias de preco e cambio para apoiar a negociacao.</span>
+              <HelpHint
+                title="Snapshot de Mercado"
+                content="Mostra as cotacoes atuais usadas como referencia. O operador pode negociar valores diferentes na ordem."
+              />
+            </div>
             <div className="grid gap-3">
               <LabeledValue label="Preço da Grama (USD) em Tempo Real" value={`USD ${rate ? format4(rate.goldPricePerGramUsd) : "0.0000"}`} />
               <LabeledValue label="Taxa USD para SRD" value={rate ? format4(rate.usdToSrdRate) : "0.0000"} />
               <LabeledValue label="Taxa EUR para USD" value={rate ? format4(rate.eurToUsdRate) : "0.0000"} />
               <LabeledValue label="Atualizado em" value={rate?.fetchedAt ? new Date(rate.fetchedAt).toLocaleString("pt-BR") : "-"} />
-              <LabeledValue label="Origem" value={rate?.sourceMode === "external-live" ? "Bolsa/API externa ao vivo" : rate ? "Fallback base local" : "-"} />
+              <LabeledValue
+                label="Origem"
+                value={
+                  rate?.sourceMode === "external-live"
+                    ? "Bolsa/API externa ao vivo"
+                    : rate?.sourceMode === "manual-input"
+                      ? "Contingencia operacional"
+                      : rate
+                        ? "Fallback base local"
+                        : "-"
+                }
+              />
             </div>
           </Card>
 
           <Card title="Resumo Operacional">
+            <div className="mb-3 flex items-center gap-2 text-xs text-stone-600">
+              <span>Painel de conferencia rapida antes de finalizar.</span>
+              <HelpHint
+                title="Resumo Operacional"
+                content="Checklist rapido com contraparte, modo da ordem e status do rateio para evitar erro de fechamento."
+              />
+            </div>
             <div className="space-y-3 text-sm text-stone-700">
               <p><strong>Clientes carregados:</strong> {loading ? "carregando" : clientCount}</p>
               <p><strong>Modo da ordem:</strong> {isWalkIn ? "Cliente Avulso" : "Cliente cadastrado"}</p>

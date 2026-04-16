@@ -1,4 +1,4 @@
-import { GoldState, GoldTransitStatus, LoanBookStatus, OpexStatus, OrderStatus } from "@prisma/client";
+import { GoldState, LoanBookStatus, OpexStatus, OrderStatus } from "@prisma/client";
 import { Decimal } from "decimal.js";
 import { Router } from "express";
 
@@ -27,7 +27,6 @@ router.get("/", async (_req, res) => {
       finalizedPurchaseIds,
       finalizedSaleIds,
       loanBooks,
-      goldTransit,
       opexToday
     ] = await Promise.all([
       prisma.vault.findUnique({ where: { code: "MAIN" } }),
@@ -78,11 +77,6 @@ router.get("/", async (_req, res) => {
       prisma.loanBookEntry.findMany({
         where: { status: { in: [LoanBookStatus.OPEN, LoanBookStatus.SETTLED] } },
         orderBy: [{ status: "asc" }, { updatedAt: "desc" }]
-      }),
-
-      prisma.goldTransitShipment.findMany({
-        where: { status: { in: [GoldTransitStatus.IN_TRANSIT, GoldTransitStatus.SETTLED] } },
-        orderBy: [{ dispatchDate: "desc" }, { createdAt: "desc" }]
       }),
 
       prisma.opexEntry.findMany({
@@ -195,14 +189,6 @@ router.get("/", async (_req, res) => {
         goldOwedGrams: r4(entry.goldOwedGrams),
         status: entry.status,
         updatedAt: entry.updatedAt.toISOString()
-      })),
-      goldTransit: goldTransit.map((shipment) => ({
-        id: shipment.id,
-        destination: shipment.destination,
-        physicalWeight: r4(shipment.physicalWeight),
-        dispatchDate: shipment.dispatchDate.toISOString().slice(0, 10),
-        expectedSettlementDate: shipment.expectedSettlementDate.toISOString().slice(0, 10),
-        status: shipment.status
       })),
       opexToday: opexToday.map((item) => ({
         id: item.id,

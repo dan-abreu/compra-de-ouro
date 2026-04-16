@@ -67,7 +67,7 @@ type DailyRate = {
   usdToSrdRate: string;
   eurToUsdRate: string;
   fetchedAt?: string;
-  sourceMode?: "external-live" | "database-fallback";
+  sourceMode?: "external-live" | "database-cached" | "manual-input";
   sources?: Array<{
     symbol: string;
     provider: string;
@@ -468,7 +468,7 @@ function RightMarketRail({
   loading: boolean;
   lastSyncLabel: string;
   usingMockRates: boolean;
-  sourceMode: "external-live" | "database-fallback";
+  sourceMode: "external-live" | "database-cached" | "manual-input";
   sources: Array<{
     symbol: string;
     provider: string;
@@ -497,7 +497,11 @@ function RightMarketRail({
               </div>
               {!usingMockRates ? (
                 <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${sourceMode === "external-live" ? "bg-sky-300/15 text-sky-200" : "bg-amber-300/15 text-amber-200"}`}>
-                  {sourceMode === "external-live" ? "Fonte externa ao vivo" : "Fonte local (fallback)"}
+                  {sourceMode === "external-live"
+                    ? "Fonte externa ao vivo"
+                    : sourceMode === "manual-input"
+                      ? "Fonte de contingencia"
+                      : "Fonte local (fallback)"}
                 </div>
               ) : null}
             </div>
@@ -597,7 +601,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [marketLoading, setMarketLoading] = React.useState(true);
   const [lastSyncLabel, setLastSyncLabel] = React.useState("-");
   const [marketSources, setMarketSources] = React.useState<DailyRate["sources"]>([]);
-  const [sourceMode, setSourceMode] = React.useState<"external-live" | "database-fallback">("database-fallback");
+  const [sourceMode, setSourceMode] = React.useState<"external-live" | "database-cached" | "manual-input">("database-cached");
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const isLoginRoute = pathname.startsWith("/login");
   const requiredRole = pathname.startsWith("/admin") ? "ADMIN" : undefined;
@@ -650,7 +654,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
         setLatestRate(rate);
         setMarketSources(rate.sources ?? []);
-        setSourceMode(rate.sourceMode ?? "database-fallback");
+        setSourceMode(rate.sourceMode ?? "database-cached");
         setLastSyncLabel(new Date(rate.fetchedAt ?? Date.now()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
       } catch {
         if (!active) {
