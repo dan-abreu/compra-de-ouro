@@ -1,10 +1,12 @@
 import { NextFunction, Request, Response } from "express";
 
+import { extractTenantIdFromHost } from "../lib/tenant-host.js";
 import { getTenantFromMaster } from "../tenant/master-client.js";
 import { runWithTenantContext } from "../tenant/tenant-context.js";
 import { getOrCreateTenantPrisma } from "../tenant/tenant-prisma-factory.js";
 
 const TENANT_HEADER = "x-tenant-id";
+const TENANT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]{1,62}$/;
 
 const extractTenantId = (req: Request): string | null => {
   const headerTenantId = req.header(TENANT_HEADER)?.trim();
@@ -12,14 +14,10 @@ const extractTenantId = (req: Request): string | null => {
     return headerTenantId;
   }
 
-  const host = req.hostname;
-  const parts = host.split(".");
-  if (parts.length >= 3) {
-    return parts[0];
-  }
-
-  return null;
+  return extractTenantIdFromHost(req.hostname);
 };
+
+const isValidTenantId = (tenantId: string) => TENANT_ID_PATTERN.test(tenantId);
 
 export const tenantResolverMiddleware = async (
   req: Request,
@@ -32,6 +30,14 @@ export const tenantResolverMiddleware = async (
       return res.status(400).json({
         message: "Tenant identifier is required in X-Tenant-ID header or subdomain.",
         code: "TENANT_ID_REQUIRED",
+        fieldErrors: {}
+      });
+    }
+
+    if (!isValidTenantId(tenantId)) {
+      return res.status(400).json({
+        message: "Tenant identifier format is invalid.",
+        code: "TENANT_ID_INVALID",
         fieldErrors: {}
       });
     }

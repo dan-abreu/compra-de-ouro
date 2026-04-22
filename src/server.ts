@@ -23,7 +23,7 @@ import { disconnectAllTenantPrismas } from "./tenant/tenant-prisma-factory.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? "3000");
-const localhostOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const localhostOriginRegex = /^https?:\/\/([a-z0-9-]+\.)*(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const defaultAllowedOrigins = [
   "http://localhost:3003",
   "http://localhost:3004",

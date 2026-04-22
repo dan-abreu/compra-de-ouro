@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS "SecurityConfig" (
+    "key" VARCHAR(120) NOT NULL,
+    "value" TEXT,
+    "updatedById" VARCHAR(64),
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SecurityConfig_pkey" PRIMARY KEY ("key")
+);

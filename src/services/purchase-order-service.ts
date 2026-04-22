@@ -2,7 +2,16 @@ import { Currency, GoldState, OrderStatus, PaymentOrderType, Prisma, PrismaClien
 
 import { AML_KYC_THRESHOLD_USD, REQUIRE_KYC_ABOVE_10K } from "../config/compliance-config.js";
 import { D, eq4, q4 } from "../lib/decimal.js";
-import { DomainError } from "../lib/errors.js";
+import { DomainError, isPrismaSchemaOutOfSyncError } from "../lib/errors.js";
+import { calculateEffectiveFineGoldWeight, calculateOrderTotalUsd } from "../lib/order-pricing.js";
+import { ensureTenantSchemaForTrading } from "../lib/tenant-schema-repair.js";
+import { getOrCreateMainVault } from "../lib/vault-utils.js";
+import {
+  convertSplitToUsd,
+  ensureValidSplits,
+  LockedRateSnapshot,
+  PaymentSplitInput
+} from "./split-conversion-service.js";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 type DecimalInstance = ReturnType<typeof D>;
@@ -22,17 +31,12 @@ export type CreatePurchaseOrderInput = {
   physicalWeight: string;
   purityPercentage: string;
   negotiatedPricePerGramUsd: string;
-  totalOrderValueUsd: string;
   paymentSplits: PurchasePaymentSplitInput[];
 };
 
-type LockedRateSnapshot = {
+type PurchaseRateSnapshot = LockedRateSnapshot & {
   goldPricePerGramUsd: DecimalInstance;
-  usdToSrdRate: DecimalInstance;
-  eurToUsdRate: DecimalInstance;
 };
-
-const MAX_MANUAL_TOTAL_ADJUSTMENT_USD = D("0.0500") as DecimalInstance;
 
 const decimalToPrisma = (value: DecimalInstance): Prisma.Decimal => {
   return new Prisma.Decimal(q4(value).toFixed(4));
@@ -45,15 +49,6 @@ const prismaToDecimal = (value: Prisma.Decimal | string | number): DecimalInstan
 const assertNonNegative = (value: DecimalInstance, label: string) => {
   if (value.isNegative()) {
     throw new DomainError(`Insufficient ${label}.`, 409);
-  }
-};
-
-const ensureValidSplits = (splits: PurchasePaymentSplitInput[]) => {
-  if (splits.length === 0) {
-    throw new DomainError("At least one payment split is required.", 422, {
-      code: "VALIDATION_ERROR",
-      fieldErrors: { paymentSplits: "At least one payment split is required." }
-    });
   }
 };
 
@@ -76,72 +71,6 @@ const getLockedRate = async (tx: DbClient, dailyRateId?: string) => {
   return latest;
 };
 
-const getOrCreateMainVault = async (tx: DbClient) => {
-  const existing = await tx.vault.findUnique({ where: { code: "MAIN" } });
-  if (existing) {
-    return existing;
-  }
-
-  return tx.vault.create({
-    data: {
-      code: "MAIN",
-      balanceGoldGrams: new Prisma.Decimal("0.0000"),
-      balanceUsd: new Prisma.Decimal("0.0000"),
-      balanceEur: new Prisma.Decimal("0.0000"),
-      balanceSrd: new Prisma.Decimal("0.0000"),
-      openGoldGrams: new Prisma.Decimal("0.0000"),
-      openGoldAcquisitionCostUsd: new Prisma.Decimal("0.0000")
-    }
-  });
-};
-
-const convertSplitToUsd = (
-  split: PurchasePaymentSplitInput,
-  snapshot: LockedRateSnapshot | null
-): DecimalInstance => {
-  const amount = q4(split.amount) as DecimalInstance;
-  const manualRate = split.manualExchangeRate ? (q4(split.manualExchangeRate) as DecimalInstance) : null;
-
-  if (split.currency === Currency.USD) {
-    return amount;
-  }
-
-  if (split.currency === Currency.SRD) {
-    if (manualRate && manualRate.gt(0)) {
-      return q4(amount.div(manualRate)) as DecimalInstance;
-    }
-
-    if (snapshot && snapshot.usdToSrdRate.gt(0)) {
-      return q4(amount.div(snapshot.usdToSrdRate)) as DecimalInstance;
-    }
-
-    throw new DomainError("Manual exchange rate is required for SRD split when no daily rate is available.", 422, {
-      code: "VALIDATION_ERROR",
-      fieldErrors: { paymentSplits: "Informe taxa manual USD/SRD para linhas em SRD." }
-    });
-  }
-
-  if (split.currency === Currency.EUR) {
-    if (manualRate && manualRate.gt(0)) {
-      return q4(amount.mul(manualRate)) as DecimalInstance;
-    }
-
-    if (snapshot && snapshot.eurToUsdRate.gt(0)) {
-      return q4(amount.mul(snapshot.eurToUsdRate)) as DecimalInstance;
-    }
-
-    throw new DomainError("Manual exchange rate is required for EUR split when no daily rate is available.", 422, {
-      code: "VALIDATION_ERROR",
-      fieldErrors: { paymentSplits: "Informe taxa manual EUR/USD para linhas em EUR." }
-    });
-  }
-
-  throw new DomainError("Unsupported split currency.", 422, {
-    code: "VALIDATION_ERROR",
-    fieldErrors: { paymentSplits: "Unsupported split currency." }
-  });
-};
-
 const ensurePositive = (value: DecimalInstance, field: string, message: string) => {
   if (!value.gt(0)) {
     throw new DomainError(message, 422, {
@@ -155,7 +84,20 @@ export class PurchaseOrderService {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(input: CreatePurchaseOrderInput) {
-    ensureValidSplits(input.paymentSplits);
+    try {
+      return await this.createInTransaction(input);
+    } catch (error) {
+      if (!isPrismaSchemaOutOfSyncError(error)) {
+        throw error;
+      }
+
+      await ensureTenantSchemaForTrading(this.prisma);
+      return this.createInTransaction(input);
+    }
+  }
+
+  private async createInTransaction(input: CreatePurchaseOrderInput) {
+    ensureValidSplits(input.paymentSplits as PaymentSplitInput[]);
 
     return this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
@@ -191,7 +133,7 @@ export class PurchaseOrderService {
           });
         }
 
-        const snapshot: LockedRateSnapshot | null = rate
+        const snapshot: PurchaseRateSnapshot | null = rate
           ? {
               goldPricePerGramUsd: prismaToDecimal(rate.goldPricePerGramUsd),
               usdToSrdRate: prismaToDecimal(rate.usdToSrdRate),
@@ -202,12 +144,10 @@ export class PurchaseOrderService {
         const physicalWeight = q4(input.physicalWeight) as DecimalInstance;
         const purityPercentage = q4(input.purityPercentage) as DecimalInstance;
         const negotiatedPricePerGramUsd = q4(input.negotiatedPricePerGramUsd) as DecimalInstance;
-        const totalOrderValueUsd = q4(input.totalOrderValueUsd) as DecimalInstance;
 
         ensurePositive(physicalWeight, "physicalWeight", "Physical weight must be greater than zero.");
         ensurePositive(purityPercentage, "purityPercentage", "Purity percentage must be greater than zero.");
         ensurePositive(negotiatedPricePerGramUsd, "negotiatedPricePerGram", "Negotiated price per gram must be greater than zero.");
-        ensurePositive(totalOrderValueUsd, "totalOrderValueUsd", "Total order value must be greater than zero.");
 
         if (purityPercentage.gt(100)) {
           throw new DomainError("purityPercentage cannot be greater than 100.", 422, {
@@ -216,8 +156,8 @@ export class PurchaseOrderService {
           });
         }
 
-        const calculatedOrderValueUsd = q4(physicalWeight.mul(negotiatedPricePerGramUsd)) as DecimalInstance;
-        const totalAmountUsd = totalOrderValueUsd;
+        const fineGoldWeight = calculateEffectiveFineGoldWeight(physicalWeight, purityPercentage);
+        const totalAmountUsd = calculateOrderTotalUsd(physicalWeight, purityPercentage, negotiatedPricePerGramUsd);
 
         ensurePositive(totalAmountUsd, "negotiatedPricePerGram", "Total order value must be greater than zero.");
 
@@ -230,28 +170,6 @@ export class PurchaseOrderService {
         }
 
         const complianceOverride = needsKycDueToThreshold && !REQUIRE_KYC_ABOVE_10K;
-
-        if (!calculatedOrderValueUsd.gt(0)) {
-          throw new DomainError("Calculated order value must be greater than zero.", 422, {
-            code: "VALIDATION_ERROR",
-            fieldErrors: { negotiatedPricePerGram: "Calculated order value must be greater than zero." }
-          });
-        }
-
-        const manualAdjustmentAbsUsd = q4(totalAmountUsd.sub(calculatedOrderValueUsd).abs()) as DecimalInstance;
-        if (manualAdjustmentAbsUsd.gt(MAX_MANUAL_TOTAL_ADJUSTMENT_USD)) {
-          throw new DomainError(
-            "Total da ordem invalido: o valor deve ser baseado em Peso do Ouro Queimado x Preco Negociado, com apenas ajuste de centavos.",
-            422,
-            {
-              code: "TOTAL_OVERRIDE_OUT_OF_RANGE",
-              fieldErrors: {
-                totalOrderValueUsd:
-                  "Ajuste manual excede o limite permitido. Confira Peso Fisico x Preco Negociado."
-              }
-            }
-          );
-        }
 
         const acquisitionCostUsd = totalAmountUsd;
 

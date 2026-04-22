@@ -2,7 +2,8 @@ import { Router } from "express";
 import { RecordStatus } from "@prisma/client";
 import { z } from "zod";
 
-import { DomainError, FieldErrorMap } from "../lib/errors.js";
+import { DomainError } from "../lib/errors.js";
+import { mapZodIssuesToFieldErrors } from "../lib/validation.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
@@ -25,19 +26,18 @@ const createClientSchema = z.object({
   )
 });
 
-const mapZodIssuesToFieldErrors = (issues: z.ZodIssue[]): FieldErrorMap => {
-  return issues.reduce<FieldErrorMap>((acc, issue) => {
-    const path = issue.path.join(".");
-    if (path && !acc[path]) {
-      acc[path] = issue.message;
-    }
-    return acc;
-  }, {});
-};
-
 router.get("/", async (_req, res) => {
-  const clients = await prisma.client.findMany({ orderBy: { createdAt: "desc" } });
-  res.json(clients);
+  try {
+    const clients = await prisma.client.findMany({ orderBy: { createdAt: "desc" } });
+    res.json(clients);
+  } catch (error) {
+    console.error("[clients] GET error:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      code: "INTERNAL_SERVER_ERROR",
+      fieldErrors: {}
+    });
+  }
 });
 
 router.post("/", async (req, res) => {

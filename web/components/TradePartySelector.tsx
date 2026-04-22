@@ -139,6 +139,15 @@ export function TradePartySelector({
   useEffect(() => {
     setRecentIds(readRecentIds(type));
 
+    if (disabled) {
+      setLoading(false);
+      setLoadError("");
+      return;
+    }
+
+    setLoading(true);
+    setLoadError("");
+
     const load = async () => {
       try {
         const rows = await apiRequest<Array<ClientRecord | SupplierRecord>>(API_PATHS[type], "GET");
@@ -154,7 +163,7 @@ export function TradePartySelector({
     };
 
     load().catch(() => setLoading(false));
-  }, [onOptionsLoaded, type]);
+  }, [disabled, onOptionsLoaded, type]);
 
   const selectedOption = useMemo(() => options.find((option) => option.id === value) ?? null, [options, value]);
 

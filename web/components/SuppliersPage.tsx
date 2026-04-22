@@ -49,7 +49,14 @@ export function SuppliersPage() {
 
   useEffect(() => {
     loadSuppliers()
-      .catch(() => setGlobalError("Falha ao carregar fornecedores."))
+      .catch((error) => {
+        if (error instanceof ApiError) {
+          setGlobalError(error.message);
+          return;
+        }
+
+        setGlobalError("Falha ao carregar fornecedores.");
+      })
       .finally(() => setLoading(false));
   }, []);
 

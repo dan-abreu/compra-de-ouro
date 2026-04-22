@@ -51,6 +51,35 @@ enum LoanBookStatus {
   CANCELED
 }
 
+enum LoanDirection {
+  RECEIVED
+  GRANTED
+}
+
+enum CounterpartyType {
+  CLIENT
+  SUPPLIER
+  EMPLOYEE
+  THIRD_PARTY
+}
+
+enum MonthlyCostType {
+  NONE
+  PERCENTAGE
+  FIXED
+}
+
+enum CostBaseType {
+  CURRENT_BALANCE
+  ORIGINAL_PRINCIPAL
+}
+
+enum SettlementExpectation {
+  CASH
+  GOLD
+  MIXED
+}
+
 enum GoldTransitStatus {
   IN_TRANSIT
   SETTLED
@@ -110,6 +139,7 @@ model Supplier {
   updatedAt          DateTime     @updatedAt
 
   salesOrders        SalesOrder[]
+  loanBookEntries    LoanBookEntry[]
 
   @@index([companyName])
   @@index([documentId])
@@ -254,21 +284,41 @@ model PaymentSplit {
 }
 
 model LoanBookEntry {
-  id              String         @id @default(cuid())
-  clientId        String?
-  counterpartyName String        @db.VarChar(180)
-  runningBalanceUsd Decimal      @db.Decimal(18, 4)
-  frontMoneyUsd   Decimal        @db.Decimal(18, 4)
-  goldOwedGrams   Decimal        @db.Decimal(18, 4)
-  status          LoanBookStatus @default(OPEN)
-  notes           String?        @db.VarChar(255)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                    String                @id @default(cuid())
+  direction             LoanDirection         @default(GRANTED)
+  counterpartyType      CounterpartyType      @default(THIRD_PARTY)
+  clientId              String?
+  supplierId            String?
+  counterpartyName      String                @db.VarChar(180)
+  counterpartyDocument  String?               @db.VarChar(80)
+  principalAmountUsd    Decimal               @db.Decimal(18, 4)
+  principalInputCurrency String               @default("USD") @db.VarChar(16)
+  principalInputAmount   Decimal              @default(0) @db.Decimal(18, 4)
+  runningBalanceUsd     Decimal               @db.Decimal(18, 4)
+  frontMoneyUsd         Decimal               @db.Decimal(18, 4)
+  goldOwedGrams         Decimal               @db.Decimal(18, 4)
+  monthlyCostType       MonthlyCostType       @default(NONE)
+  monthlyRatePercent    Decimal?              @db.Decimal(18, 4)
+  monthlyFixedCostUsd   Decimal?              @db.Decimal(18, 4)
+  costBaseType          CostBaseType?
+  settlementExpectation SettlementExpectation @default(CASH)
+  startDate             DateTime              @db.Date
+  dueDate               DateTime?             @db.Date
+  billingDay            Int?
+  status                LoanBookStatus        @default(OPEN)
+  notes                 String?               @db.VarChar(255)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
-  client          Client?        @relation(fields: [clientId], references: [id])
+  client                Client?               @relation(fields: [clientId], references: [id])
+  supplier              Supplier?             @relation(fields: [supplierId], references: [id])
 
   @@index([clientId])
+  @@index([supplierId])
+  @@index([direction])
+  @@index([counterpartyType])
   @@index([status])
+  @@index([startDate])
   @@index([createdAt])
 }
 
@@ -300,4 +350,12 @@ model OpexEntry {
 
   @@index([status])
   @@index([occurredAt])
+}
+
+model SecurityConfig {
+  key         String   @id @db.VarChar(120)
+  value       String?  @db.Text
+  updatedById String?  @db.VarChar(64)
+  updatedAt   DateTime @default(now()) @updatedAt
+  createdAt   DateTime @default(now())
 }

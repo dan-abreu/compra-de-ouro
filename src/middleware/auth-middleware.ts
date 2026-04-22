@@ -32,6 +32,7 @@ export const authMiddleware = async (
 
     // Attach userId to request
     req.userId = payload.userId;
+    req.userRole = payload.role;
 
     next();
   } catch (error) {

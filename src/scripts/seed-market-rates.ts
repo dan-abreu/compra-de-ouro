@@ -1,11 +1,11 @@
-import { prisma } from "../prisma.js";
+import { rootPrisma } from "../prisma.js";
 
 async function seedMarketRates() {
   try {
     console.log("[seed] Iniciando inserção de taxas de mercado...");
 
     // Busca um operador ativo para atribui os dados
-    const operator = await prisma.user.findFirst({
+    const operator = await rootPrisma.user.findFirst({
       where: { status: "ACTIVE" },
     });
 
@@ -20,13 +20,13 @@ async function seedMarketRates() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const existingRate = await prisma.dailyRate.findUnique({
+    const existingRate = await rootPrisma.dailyRate.findUnique({
       where: { rateDate: today },
     });
 
     if (existingRate) {
       console.log("[seed] Taxa para hoje já existe, atualizando...");
-      await prisma.dailyRate.update({
+      await rootPrisma.dailyRate.update({
         where: { rateDate: today },
         data: {
           goldPricePerGramUsd: "2.15", // ~67 USD/oz ÷ 31.1035
@@ -37,7 +37,7 @@ async function seedMarketRates() {
       console.log("[seed] Taxa atualizada com sucesso!");
     } else {
       console.log("[seed] Criando taxa para hoje...");
-      await prisma.dailyRate.create({
+      await rootPrisma.dailyRate.create({
         data: {
           rateDate: today,
           createdById: operator.id,
@@ -57,7 +57,7 @@ async function seedMarketRates() {
     console.error("[seed] Erro ao inserir taxas:", error);
     throw error;
   } finally {
-    await prisma.$disconnect();
+    await rootPrisma.$disconnect();
   }
 }
 

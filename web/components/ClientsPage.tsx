@@ -52,7 +52,14 @@ export function ClientsPage() {
 
   useEffect(() => {
     loadClients()
-      .catch(() => setGlobalError("Falha ao carregar clientes."))
+      .catch((error) => {
+        if (error instanceof ApiError) {
+          setGlobalError(error.message);
+          return;
+        }
+
+        setGlobalError("Falha ao carregar clientes.");
+      })
       .finally(() => setLoading(false));
   }, []);
 

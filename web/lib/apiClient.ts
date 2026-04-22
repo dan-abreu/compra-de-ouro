@@ -1,4 +1,5 @@
 import { getAuthSnapshot, hydrateAuthStore } from "@/lib/auth-store";
+import { getTenantIdFromBrowserHost } from "@/lib/tenant-host";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000/api";
 
@@ -33,7 +34,7 @@ const buildHeaders = (options?: ApiRequestOptions): HeadersInit => {
   hydrateAuthStore();
 
   const snapshot = getAuthSnapshot();
-  const tenantId = options?.tenantId ?? snapshot.tenantId;
+  const tenantId = options?.tenantId ?? snapshot.tenantId ?? getTenantIdFromBrowserHost();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
@@ -51,12 +52,22 @@ const buildHeaders = (options?: ApiRequestOptions): HeadersInit => {
 };
 
 export async function apiRequest<T>(path: string, method: ApiMethod, body?: unknown, options?: ApiRequestOptions): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: buildHeaders(options),
-    body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store"
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: buildHeaders(options),
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store"
+    });
+  } catch {
+    throw new ApiError(503, {
+      message: "Nao foi possivel conectar na API. Verifique se o backend esta rodando.",
+      code: "API_UNREACHABLE",
+      fieldErrors: {}
+    });
+  }
 
   if (!response.ok) {
     let payload: ApiErrorPayload;

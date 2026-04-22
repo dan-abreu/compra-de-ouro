@@ -2,14 +2,12 @@ import { GoldTransitStatus, Prisma } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 
-import { DomainError, FieldErrorMap } from "../lib/errors.js";
+import { DomainError } from "../lib/errors.js";
+import { decimalString } from "../lib/schemas.js";
+import { mapZodIssuesToFieldErrors } from "../lib/validation.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
-
-const decimalString = z
-  .string()
-  .regex(/^\d+(\.\d{1,4})?$/, "Must be a positive decimal string with up to 4 places");
 
 const createTransitSchema = z.object({
   destination: z.string().min(2, "Destino obrigatorio."),
@@ -21,16 +19,6 @@ const createTransitSchema = z.object({
     z.string().min(2).optional()
   )
 });
-
-const mapZodIssuesToFieldErrors = (issues: z.ZodIssue[]): FieldErrorMap => {
-  return issues.reduce<FieldErrorMap>((acc, issue) => {
-    const path = issue.path.join(".");
-    if (path && !acc[path]) {
-      acc[path] = issue.message;
-    }
-    return acc;
-  }, {});
-};
 
 router.get("/", async (_req, res) => {
   const rows = await prisma.goldTransitShipment.findMany({

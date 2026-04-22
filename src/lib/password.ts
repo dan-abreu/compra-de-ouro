@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 
 const sha256 = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 
+export const createPasswordHash = (password: string): string => {
+  return `sha256:${sha256(password)}`;
+};
+
 export const verifyPassword = (input: { password: string; storedHash: string }): boolean => {
   const { password, storedHash } = input;
 

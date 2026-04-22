@@ -2,7 +2,9 @@ import { Currency, GoldState } from "@prisma/client";
 import { NextFunction, Request, Response, Router } from "express";
 import { z } from "zod";
 
-import { DomainError, FieldErrorMap } from "../lib/errors.js";
+import { DomainError, mapInfrastructureError } from "../lib/errors.js";
+import { decimalString } from "../lib/schemas.js";
+import { mapZodIssuesToFieldErrors } from "../lib/validation.js";
 import { prisma } from "../prisma.js";
 import { PurchaseOrderService } from "../services/purchase-order-service.js";
 import { SalesOrderService } from "../services/sales-order-service.js";
@@ -10,10 +12,6 @@ import { SalesOrderService } from "../services/sales-order-service.js";
 const router = Router();
 const purchaseOrderService = new PurchaseOrderService(prisma);
 const salesOrderService = new SalesOrderService(prisma);
-
-const decimalString = z
-  .string()
-  .regex(/^\d+(\.\d{1,4})?$/, "Must be a positive decimal string with up to 4 places");
 
 const splitSchema = z.object({
   currency: z.nativeEnum(Currency),
@@ -30,7 +28,6 @@ const createPurchaseSchema = z
     physicalWeight: decimalString,
     purityPercentage: decimalString,
     negotiatedPricePerGram: decimalString,
-    totalOrderValueUsd: decimalString,
     paymentSplits: z.array(splitSchema).min(1)
   })
   .superRefine((data, ctx) => {
@@ -52,7 +49,6 @@ const createSalesSchema = z
     physicalWeight: decimalString,
     purityPercentage: decimalString,
     negotiatedPricePerGram: decimalString,
-    totalOrderValueUsd: decimalString,
     paymentSplits: z.array(splitSchema).min(1)
   })
   .superRefine((data, ctx) => {
@@ -69,16 +65,6 @@ const cancelSchema = z.object({
   reason: z.string().max(255).optional()
 });
 
-const mapZodIssuesToFieldErrors = (issues: z.ZodIssue[]): FieldErrorMap => {
-  return issues.reduce<FieldErrorMap>((acc, issue) => {
-    const path = issue.path.join(".");
-    if (path && !acc[path]) {
-      acc[path] = issue.message;
-    }
-    return acc;
-  }, {});
-};
-
 const asyncHandler = <T>(fn: (req: Request, res: Response) => Promise<T>) => {
   return async (req: Request, res: Response, _next: NextFunction) => {
     try {
@@ -92,6 +78,15 @@ const asyncHandler = <T>(fn: (req: Request, res: Response) => Promise<T>) => {
         });
       }
 
+      const infraError = mapInfrastructureError(error);
+      if (infraError) {
+        return res.status(infraError.statusCode).json({
+          message: infraError.message,
+          code: infraError.code,
+          fieldErrors: infraError.fieldErrors ?? {}
+        });
+      }
+
       if (error instanceof Error && "issues" in error) {
         const zodError = error as z.ZodError;
         return res.status(422).json({
@@ -101,6 +96,8 @@ const asyncHandler = <T>(fn: (req: Request, res: Response) => Promise<T>) => {
           issues: zodError.issues
         });
       }
+
+      console.error("[orders] unhandled error:", error);
 
       return res.status(500).json({
         message: "Internal server error",
@@ -132,7 +129,6 @@ router.post(
       physicalWeight: payload.physicalWeight,
       purityPercentage: payload.purityPercentage,
       negotiatedPricePerGramUsd: payload.negotiatedPricePerGram,
-      totalOrderValueUsd: payload.totalOrderValueUsd,
       paymentSplits: payload.paymentSplits
     });
     res.status(201).json(order);
@@ -160,7 +156,6 @@ router.post(
       physicalWeight: payload.physicalWeight,
       purityPercentage: payload.purityPercentage,
       negotiatedPricePerGramUsd: payload.negotiatedPricePerGram,
-      totalOrderValueUsd: payload.totalOrderValueUsd,
       paymentSplits: payload.paymentSplits
     });
     res.status(201).json(order);

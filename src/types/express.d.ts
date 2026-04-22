@@ -6,6 +6,7 @@ declare global {
       tenantId?: string;
       tenantPrisma?: PrismaClient;
       userId?: string;
+      userRole?: string;
     }
   }
 }

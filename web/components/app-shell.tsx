@@ -7,20 +7,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { apiRequest } from "@/lib/apiClient";
+import { MarketCard } from "@/components/shell/MarketCard";
+import { RightMarketRail } from "@/components/shell/RightMarketRail";
+import { toMarketAssets } from "@/components/shell/market-assets";
+import { useMarketLiveFeed } from "@/components/shell/useMarketLiveFeed";
 import { useAuthStore } from "@/lib/auth-store";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-import {
   BadgeDollarSign,
-  BarChart3,
   Bell,
   BookOpenText,
   Building2,
@@ -31,8 +24,8 @@ import {
   Landmark,
   LayoutDashboard,
   Menu,
-  TrendingDown,
-  TrendingUp,
+  Settings,
+  UserRound,
   Users
 } from "lucide-react";
 
@@ -43,7 +36,9 @@ const navigation = [
   { href: "/extrato", label: "Extrato", shortLabel: "Book", icon: BookOpenText },
   { href: "/tesouraria", label: "Tesouraria", shortLabel: "FX", icon: Landmark },
   { href: "/clientes", label: "Clientes", shortLabel: "Cli", icon: Users },
-  { href: "/fornecedores", label: "Fornecedores", shortLabel: "Sup", icon: Building2 }
+  { href: "/fornecedores", label: "Fornecedores", shortLabel: "Sup", icon: Building2 },
+  { href: "/perfil", label: "Perfil", shortLabel: "User", icon: UserRound },
+  { href: "/configuracoes", label: "Configuracoes", shortLabel: "Cfg", icon: Settings }
 ] as const;
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -53,123 +48,10 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   "/extrato": { title: "Extrato", subtitle: "Ledger cronologico e resultado operacional" },
   "/tesouraria": { title: "Tesouraria", subtitle: "Extrato gerencial, cofre e lucratividade" },
   "/clientes": { title: "Clientes", subtitle: "Cadastro e relacionamento com vendedores" },
-  "/fornecedores": { title: "Fornecedores", subtitle: "Cadastro institucional de compradores" }
+  "/fornecedores": { title: "Fornecedores", subtitle: "Cadastro institucional de compradores" },
+  "/perfil": { title: "Perfil", subtitle: "Dados do operador, credenciais e identidade" },
+  "/configuracoes": { title: "Configuracoes", subtitle: "Preferencias operacionais e seguranca" }
 };
-
-type MarketPoint = {
-  time: string;
-  value: number;
-};
-
-type DailyRate = {
-  rateDate: string;
-  goldPricePerGramUsd: string;
-  usdToSrdRate: string;
-  eurToUsdRate: string;
-  fetchedAt?: string;
-  sourceMode?: "external-live" | "database-cached" | "manual-input";
-  sources?: Array<{
-    symbol: string;
-    provider: string;
-    url: string;
-    note: string;
-  }>;
-};
-
-type MarketAsset = {
-  symbol: string;
-  name: string;
-  price: string;
-  delta: string;
-  percent: string;
-  trend: "up" | "down";
-  accent: string;
-  glow: string;
-  history: MarketPoint[];
-};
-
-const marketAssets: MarketAsset[] = [
-  {
-    symbol: "XAU/USD",
-    name: "Gold Spot",
-    price: "2,384.72",
-    delta: "+18.41",
-    percent: "+0.78%",
-    trend: "up",
-    accent: "#f5b942",
-    glow: "from-amber-300/20 to-transparent",
-    history: [
-      { time: "00h", value: 2340 },
-      { time: "03h", value: 2348 },
-      { time: "06h", value: 2354 },
-      { time: "09h", value: 2362 },
-      { time: "12h", value: 2356 },
-      { time: "15h", value: 2368 },
-      { time: "18h", value: 2376 },
-      { time: "21h", value: 2384 }
-    ]
-  },
-  {
-    symbol: "USD/BRL",
-    name: "Dollar Real",
-    price: "5.1824",
-    delta: "-0.0321",
-    percent: "-0.62%",
-    trend: "down",
-    accent: "#ef4444",
-    glow: "from-rose-300/20 to-transparent",
-    history: [
-      { time: "00h", value: 5.24 },
-      { time: "03h", value: 5.23 },
-      { time: "06h", value: 5.22 },
-      { time: "09h", value: 5.2 },
-      { time: "12h", value: 5.19 },
-      { time: "15h", value: 5.18 },
-      { time: "18h", value: 5.17 },
-      { time: "21h", value: 5.1824 }
-    ]
-  },
-  {
-    symbol: "EUR/USD",
-    name: "Euro Dollar",
-    price: "1.0831",
-    delta: "+0.0047",
-    percent: "+0.44%",
-    trend: "up",
-    accent: "#22c55e",
-    glow: "from-emerald-300/20 to-transparent",
-    history: [
-      { time: "00h", value: 1.071 },
-      { time: "03h", value: 1.074 },
-      { time: "06h", value: 1.076 },
-      { time: "09h", value: 1.078 },
-      { time: "12h", value: 1.08 },
-      { time: "15h", value: 1.079 },
-      { time: "18h", value: 1.081 },
-      { time: "21h", value: 1.0831 }
-    ]
-  },
-  {
-    symbol: "USD/SRD",
-    name: "Dollar Suriname",
-    price: "38.2000",
-    delta: "+0.1200",
-    percent: "+0.31%",
-    trend: "up",
-    accent: "#38bdf8",
-    glow: "from-sky-300/20 to-transparent",
-    history: [
-      { time: "00h", value: 37.82 },
-      { time: "03h", value: 37.88 },
-      { time: "06h", value: 37.95 },
-      { time: "09h", value: 38.01 },
-      { time: "12h", value: 38.08 },
-      { time: "15h", value: 38.12 },
-      { time: "18h", value: 38.16 },
-      { time: "21h", value: 38.2 }
-    ]
-  }
-];
 
 const getShellMetrics = (isDesktop: boolean, leftExpanded: boolean, rightExpanded: boolean) => {
   if (!isDesktop) {
@@ -196,137 +78,6 @@ const getShellMetrics = (isDesktop: boolean, leftExpanded: boolean, rightExpande
 const usePageMeta = (pathname: string) => {
   const entry = Object.entries(pageTitles).find(([route]) => pathname.startsWith(route));
   return entry?.[1] ?? { title: "Casa de Ouro ERP", subtitle: "Terminal institucional de operacoes" };
-};
-
-const formatPrice = (value: number, digits: number) => value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-const HOURS = Array.from({ length: 24 }, (_, hour) => `${hour.toString().padStart(2, "0")}h`);
-
-const buildHistory = (current: number, dayMovePercent: number): MarketPoint[] => {
-  const safeMovePercent = Number.isFinite(dayMovePercent) ? dayMovePercent : 0;
-  const origin = current / (1 + safeMovePercent / 100);
-
-  return HOURS.map((time, index) => {
-    if (index === HOURS.length - 1) {
-      return {
-        time,
-        value: Number(current.toFixed(6))
-      };
-    }
-
-    const progress = index / (HOURS.length - 1);
-    const drift = 1 + (safeMovePercent / 100) * progress;
-    const wave = 1 + Math.sin(progress * Math.PI * 2) * 0.006;
-
-    return {
-      time,
-      value: Number((origin * drift * wave).toFixed(6))
-    };
-  });
-};
-
-const parseMarketPrice = (value: string) => Number(value.replace(/,/g, ""));
-const parsePercentValue = (value: string) => Number(value.replace("%", ""));
-
-const toMarketAssets = (rate: DailyRate | null): MarketAsset[] => {
-  if (!rate) {
-    const xau = marketAssets.find((asset) => asset.symbol === "XAU/USD");
-    const xauSpot = xau ? parseMarketPrice(xau.price) : 0;
-    const gramReference = xauSpot > 0 ? (xauSpot / 31.1035) * 0.9 : 0;
-
-    const referenceAsset: MarketAsset = {
-      symbol: "GRAM-REF/USD",
-      name: "Grama Referencia",
-      price: formatPrice(gramReference, 4),
-      delta: "+0.0000",
-      percent: xau?.percent ?? "+0.00%",
-      trend: (xau?.trend ?? "up") as "up" | "down",
-      accent: "#f59e0b",
-      glow: "from-amber-300/20 to-transparent",
-      history: buildHistory(gramReference, parsePercentValue(xau?.percent ?? "+0.00%"))
-    };
-
-    const normalizedFallback: MarketAsset[] = marketAssets.map((asset) => ({
-      ...asset,
-      history: buildHistory(parseMarketPrice(asset.price), parsePercentValue(asset.percent))
-    }));
-
-    return [
-      referenceAsset,
-      ...normalizedFallback
-    ];
-  }
-
-  const goldGram = Number(rate.goldPricePerGramUsd);
-  const goldOz = Number(rate.goldPricePerGramUsd) * 31.1035;
-  const referenceGram = goldGram * 0.9;
-  const usdSrd = Number(rate.usdToSrdRate);
-  const eurUsd = Number(rate.eurToUsdRate);
-  const usdBrl = Number((usdSrd / 7.35).toFixed(4));
-
-  const live = [
-    {
-      symbol: "GRAM-REF/USD",
-      name: "Grama Referencia",
-      current: referenceGram,
-      move: 0.78,
-      accent: "#f59e0b",
-      glow: "from-amber-300/20 to-transparent",
-      digits: 4
-    },
-    {
-      symbol: "XAU/USD",
-      name: "Gold Spot",
-      current: goldOz,
-      move: 0.78,
-      accent: "#f5b942",
-      glow: "from-amber-300/20 to-transparent",
-      digits: 2
-    },
-    {
-      symbol: "USD/BRL",
-      name: "Dollar Real",
-      current: usdBrl,
-      move: -0.32,
-      accent: "#ef4444",
-      glow: "from-rose-300/20 to-transparent",
-      digits: 4
-    },
-    {
-      symbol: "EUR/USD",
-      name: "Euro Dollar",
-      current: eurUsd,
-      move: 0.41,
-      accent: "#22c55e",
-      glow: "from-emerald-300/20 to-transparent",
-      digits: 4
-    },
-    {
-      symbol: "USD/SRD",
-      name: "Dollar Suriname",
-      current: usdSrd,
-      move: 0.26,
-      accent: "#38bdf8",
-      glow: "from-sky-300/20 to-transparent",
-      digits: 4
-    }
-  ];
-
-  return live.map((asset) => {
-    const previous = asset.current / (1 + asset.move / 100);
-    const delta = asset.current - previous;
-
-    return {
-      symbol: asset.symbol,
-      name: asset.name,
-      price: formatPrice(asset.current, asset.digits),
-      delta: `${delta >= 0 ? "+" : ""}${formatPrice(delta, asset.digits)}`,
-      percent: `${asset.move >= 0 ? "+" : ""}${asset.move.toFixed(2)}%`,
-      trend: asset.move >= 0 ? "up" : "down",
-      accent: asset.accent,
-      glow: asset.glow,
-      history: buildHistory(asset.current, asset.move)
-    };
-  });
 };
 
 function LeftNavRail({ expanded, pathname }: { expanded: boolean; pathname: string }) {
@@ -389,178 +140,6 @@ function LeftNavRail({ expanded, pathname }: { expanded: boolean; pathname: stri
   );
 }
 
-function MarketCard({ asset, expanded }: { asset: MarketAsset; expanded: boolean }) {
-  const positive = asset.trend === "up";
-  const TrendIcon = positive ? TrendingUp : TrendingDown;
-
-  return (
-    <div className={`overflow-hidden rounded-3xl border border-white/10 bg-slate-900/80 p-3 text-white transition-all duration-300 ${expanded ? "min-h-[220px]" : "min-h-[112px]"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{asset.symbol}</p>
-          <p className={`mt-1 font-heading font-semibold ${expanded ? "text-2xl" : "text-lg"}`}>{asset.price}</p>
-        </div>
-        <div className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? "bg-emerald-400/10 text-emerald-300" : "bg-rose-400/10 text-rose-300"}`}>
-          <TrendIcon className="h-3.5 w-3.5" />
-          {asset.percent}
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between gap-3 text-xs">
-        <div>
-          <p className="text-slate-500">24h delta</p>
-          <p className={`mt-1 font-semibold ${positive ? "text-emerald-300" : "text-rose-300"}`}>{asset.delta}</p>
-        </div>
-        <div className={`rounded-full bg-gradient-to-r ${asset.glow} px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-300`}>
-          Market Feed
-        </div>
-      </div>
-
-      {expanded ? (
-        <div className="mt-4 h-28 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={asset.history} margin={{ top: 10, right: 0, left: -24, bottom: 0 }}>
-              <defs>
-                <linearGradient id={`gradient-${asset.symbol.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={asset.accent} stopOpacity={0.45} />
-                  <stop offset="100%" stopColor={asset.accent} stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
-              <XAxis dataKey="time" interval={0} tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 9 }} />
-              <YAxis hide domain={["dataMin - 0.05", "dataMax + 0.05"]} />
-              <Tooltip
-                contentStyle={{
-                  background: "#020617",
-                  border: "1px solid rgba(148,163,184,0.18)",
-                  borderRadius: "16px",
-                  color: "#f8fafc"
-                }}
-                labelStyle={{ color: "#cbd5e1" }}
-              />
-              <Area type="monotone" dataKey="value" stroke={asset.accent} strokeWidth={2} fill={`url(#gradient-${asset.symbol.replace(/\W/g, "")})`} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      ) : null}
-
-      <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
-        <span>{asset.name}</span>
-        <span>24h</span>
-      </div>
-    </div>
-  );
-}
-
-function RightMarketRail({
-  expanded,
-  assets,
-  loading,
-  lastSyncLabel,
-  usingMockRates,
-  sourceMode,
-  sources,
-  xauUsdSpot,
-  referenceGramUsd
-}: {
-  expanded: boolean;
-  assets: MarketAsset[];
-  loading: boolean;
-  lastSyncLabel: string;
-  usingMockRates: boolean;
-  sourceMode: "external-live" | "database-cached" | "manual-input";
-  sources: Array<{
-    symbol: string;
-    provider: string;
-    url: string;
-    note: string;
-  }>;
-  xauUsdSpot: number | null;
-  referenceGramUsd: number | null;
-}) {
-  return (
-    <aside
-      className={`fixed bottom-4 right-4 top-4 z-40 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/95 shadow-[0_30px_90px_rgba(2,6,23,0.45)] backdrop-blur-xl transition-all duration-300 ${expanded ? "w-[25rem]" : "w-36"}`}
-    >
-      <div className="flex h-full flex-col">
-        <div className="border-b border-white/10 px-4 py-5 text-white">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-400/10 text-sky-300">
-              <BarChart3 className="h-5 w-5" />
-            </div>
-            <div className={`transition-all duration-300 ${expanded ? "opacity-100" : "pointer-events-none opacity-0"}`}>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Live watchlist</p>
-              <p className="font-heading text-lg font-semibold">Mercado 24h</p>
-              <p className="mt-1 text-xs text-slate-500">{loading ? "Atualizando taxas..." : `Sincronizado: ${lastSyncLabel}`}</p>
-              <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${usingMockRates ? "bg-amber-300/15 text-amber-200" : "bg-emerald-300/15 text-emerald-200"}`}>
-                {usingMockRates ? "Modo fallback mock" : "Dados reais da API"}
-              </div>
-              {!usingMockRates ? (
-                <div className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${sourceMode === "external-live" ? "bg-sky-300/15 text-sky-200" : "bg-amber-300/15 text-amber-200"}`}>
-                  {sourceMode === "external-live"
-                    ? "Fonte externa ao vivo"
-                    : sourceMode === "manual-input"
-                      ? "Fonte de contingencia"
-                      : "Fonte local (fallback)"}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        {expanded ? (
-          <>
-            <div className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
-              <div className="rounded-2xl border border-amber-300/30 bg-amber-300/10 px-3 py-3 text-amber-100">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200/90">Referencia da grama</p>
-                <p className="mt-1 text-lg font-semibold">
-                  {referenceGramUsd !== null ? `USD ${referenceGramUsd.toFixed(4)}` : "-"}
-                </p>
-                <p className="mt-1 text-[11px] text-amber-100/80">
-                  Formula: (XAU/USD {xauUsdSpot !== null ? xauUsdSpot.toFixed(2) : "-"} / 31.1035) - 10%
-                </p>
-                <p className="mt-1 text-[11px] text-amber-100/70">Uso: valor de referencia para negociar; preco da ordem continua manual.</p>
-              </div>
-
-              {assets.map((asset) => (
-                <MarketCard key={asset.symbol} asset={asset} expanded={expanded} />
-              ))}
-            </div>
-            <div className="border-t border-white/10 px-4 py-3 text-xs text-slate-300">
-              <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">Fontes das cotacoes</p>
-              <div className="space-y-2">
-                {sources.map((source) => (
-                  <div key={`${source.symbol}-${source.url}`} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                    <p className="font-semibold text-slate-100">{source.symbol} · {source.provider}</p>
-                    <p className="mt-0.5 text-slate-400">{source.note}</p>
-                    <a className="mt-1 inline-block text-sky-300 hover:text-sky-200" href={source.url} target="_blank" rel="noreferrer">
-                      {source.url}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 space-y-2 overflow-y-auto px-3 py-4">
-            <div className="rounded-xl border border-amber-300/30 bg-amber-300/10 px-2.5 py-2 text-amber-100">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-amber-200/90">Grama ref.</p>
-              <p className="mt-1 text-sm font-semibold leading-none">{referenceGramUsd !== null ? referenceGramUsd.toFixed(4) : "-"}</p>
-            </div>
-
-            {assets.map((asset) => (
-              <div key={asset.symbol} className="rounded-xl border border-white/10 bg-slate-900/80 px-2.5 py-2 text-white">
-                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">{asset.symbol}</p>
-                <p className="mt-1 text-sm font-semibold leading-none">{asset.price}</p>
-                <p className={`mt-1 text-[11px] ${asset.trend === "up" ? "text-emerald-300" : "text-rose-300"}`}>{asset.percent}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
 
 function MobileQuickNav({ pathname }: { pathname: string }) {
   return (
@@ -597,11 +176,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [marketPinnedOpen, setMarketPinnedOpen] = React.useState(false);
   const [isDesktop, setIsDesktop] = React.useState(true);
   const [mobileMarketOpen, setMobileMarketOpen] = React.useState(false);
-  const [latestRate, setLatestRate] = React.useState<DailyRate | null>(null);
-  const [marketLoading, setMarketLoading] = React.useState(true);
-  const [lastSyncLabel, setLastSyncLabel] = React.useState("-");
-  const [marketSources, setMarketSources] = React.useState<DailyRate["sources"]>([]);
-  const [sourceMode, setSourceMode] = React.useState<"external-live" | "database-cached" | "manual-input">("database-cached");
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const isLoginRoute = pathname.startsWith("/login");
   const requiredRole = pathname.startsWith("/admin") ? "ADMIN" : undefined;
@@ -638,59 +212,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [isDesktop, marketPinnedOpen, mobileMarketOpen]);
 
-  React.useEffect(() => {
-    if (isLoginRoute || !auth.isAuthenticated) {
-      return;
-    }
-
-    let active = true;
-
-    const loadLatestRate = async () => {
-      try {
-        setMarketLoading(true);
-        const rate = await apiRequest<DailyRate>("/rates/market-live", "GET");
-        if (!active) {
-          return;
-        }
-        setLatestRate(rate);
-        setMarketSources(rate.sources ?? []);
-        setSourceMode(rate.sourceMode ?? "database-cached");
-        setLastSyncLabel(new Date(rate.fetchedAt ?? Date.now()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
-      } catch {
-        if (!active) {
-          return;
-        }
-        setLatestRate(null);
-        setMarketSources([]);
-        setLastSyncLabel("mock");
-      } finally {
-        if (active) {
-          setMarketLoading(false);
-        }
-      }
-    };
-
-    loadLatestRate().catch(() => {
-      setLatestRate(null);
-      setMarketSources([]);
-      setLastSyncLabel("mock");
-      setMarketLoading(false);
-    });
-
-    const timer = window.setInterval(() => {
-      loadLatestRate().catch(() => {
-        setLatestRate(null);
-        setMarketSources([]);
-        setLastSyncLabel("mock");
-        setMarketLoading(false);
-      });
-    }, 90_000);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [auth.isAuthenticated, isLoginRoute]);
+  const { latestRate, marketLoading, lastSyncLabel, marketSources, sourceMode } = useMarketLiveFeed({
+    isEnabled: !isLoginRoute && auth.isAuthenticated
+  });
 
   const tenantLabel = auth.tenantName ?? auth.tenantId ?? "-";
   const userLabel = auth.userName ?? "-";
@@ -840,7 +364,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <>
                   <MobileQuickNav pathname={pathname} />
                   <div className={`mb-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${usingMockRates ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-                    {usingMockRates ? "Mercado em fallback mock" : "Mercado em dados reais"}
+                    {usingMockRates ? "Mercado indisponivel (sem mock)" : "Mercado em dados reais"}
                   </div>
                   {mobileMarketOpen ? (
                     <div className="mb-4 grid gap-3 sm:grid-cols-2">

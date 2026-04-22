@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { ApiError, apiRequest } from "@/lib/apiClient";
 import { setAuthSession } from "@/lib/auth-store";
+import { getTenantIdFromBrowserHost } from "@/lib/tenant-host";
 
 type LoginResponse = {
   accessToken: string;
@@ -17,39 +18,27 @@ type LoginResponse = {
   };
 };
 
-const getTenantFromHost = () => {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  const host = window.location.hostname;
-  const parts = host.split(".");
-  if (parts.length >= 3 && parts[0] !== "www" && host !== "localhost") {
-    return parts[0];
-  }
-
-  return "";
-};
-
-export function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const hostTenantId = React.useMemo(() => getTenantIdFromBrowserHost(), []);
 
   const [tenantId, setTenantId] = React.useState("");
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const tenantLockedByHost = hostTenantId.length > 0;
 
   React.useEffect(() => {
-    setTenantId((current) => current || getTenantFromHost());
-  }, []);
+    setTenantId((current) => current || hostTenantId);
+  }, [hostTenantId]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
 
-    const normalizedTenant = tenantId.trim();
+    const normalizedTenant = tenantId.trim() || hostTenantId;
     const normalizedUsername = username.trim().toLowerCase();
 
     if (!normalizedTenant || !normalizedUsername || !password) {
@@ -109,9 +98,15 @@ export function LoginPage() {
               value={tenantId}
               onChange={(event) => setTenantId(event.target.value)}
               placeholder="ex: loja-centro"
-              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-300"
+              disabled={tenantLockedByHost}
+              className={`w-full rounded-xl border border-slate-700 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-300 ${tenantLockedByHost ? "cursor-not-allowed bg-slate-800 text-slate-400" : "bg-slate-900"}`}
               autoComplete="organization"
             />
+            {tenantLockedByHost ? (
+              <span className="mt-1.5 block text-xs text-slate-400">
+                Tenant definido pelo subdominio atual: <strong className="text-slate-200">{hostTenantId}</strong>
+              </span>
+            ) : null}
           </label>
 
           <label className="block text-sm">
@@ -148,5 +143,13 @@ export function LoginPage() {
         </form>
       </section>
     </main>
+  );
+}
+
+export function LoginPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <LoginPageInner />
+    </React.Suspense>
   );
 }

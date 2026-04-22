@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { DomainError, FieldErrorMap } from "../lib/errors.js";
+import { DomainError } from "../lib/errors.js";
+import { mapZodIssuesToFieldErrors } from "../lib/validation.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
@@ -19,16 +20,6 @@ const createSupplierSchema = z.object({
   phone: optionalString(4),
   address: optionalString(4)
 });
-
-const mapZodIssuesToFieldErrors = (issues: z.ZodIssue[]): FieldErrorMap => {
-  return issues.reduce<FieldErrorMap>((acc, issue) => {
-    const path = issue.path.join(".");
-    if (path && !acc[path]) {
-      acc[path] = issue.message;
-    }
-    return acc;
-  }, {});
-};
 
 router.get("/", async (_req, res) => {
   const suppliers = await prisma.supplier.findMany({ orderBy: { createdAt: "desc" } });

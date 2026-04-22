@@ -89,7 +89,12 @@ export const verifyAndDecodeJwt = (token: string, secret: string): JwtPayload =>
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
 
-  if (providedSignature !== expectedSignature) {
+  const a = Buffer.from(providedSignature);
+  const b = Buffer.from(expectedSignature);
+  const signaturesMatch =
+    a.length === b.length &&
+    crypto.timingSafeEqual(a, b);
+  if (!signaturesMatch) {
     throw new Error("Invalid JWT signature");
   }
 
